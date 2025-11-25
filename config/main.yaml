@@ -1,0 +1,16 @@
+guild_id: 1218981016627318834
+autoupdate: false
+opt_plugins:
+- motd
+- backup
+- userstats
+- missionstats
+- pretense
+- realweather
+- scheduler
+- punishment
+- voting
+- lotatc
+- mission
+- slotblocking
+- modmanager

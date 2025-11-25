@@ -1,0 +1,12 @@
+DEFAULT:
+  wipe_stats_on_leave: false # wipe user statistics if they leave your Discord server (default: true)
+Caucasus:
+  enabled: true
+Syria:
+  enabled: true  # we disable statistics gathering on instance2
+Syria CW:
+  enabled: true  # we disable statistics gathering on instance2
+Persian Gulf:
+  enabled: true  # we disable statistics gathering on instance2
+CWG:
+  enabled: false  # we disable statistics gathering on instance2

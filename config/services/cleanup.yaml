@@ -1,0 +1,9 @@
+DEFAULT:
+  dcs.log:
+    directory: "{instance.home}/Logs"
+    pattern: "*.*"
+    delete_after: 2
+  trackfiles:
+    directory: "{instance.home}/Tracks/Multiplayer"
+    pattern: "*.trk"
+    delete_after: 1

@@ -1,0 +1,20 @@
+DEFAULT:
+  options:
+    preset:
+      choices:
+        - Day
+        - Night
+    restart:              # Vote for a mission restart
+      run_extensions: true  # do not run any mission modifications (like RealWeather)
+    kick: {}              # Vote for kicking a player
+    tempban:              # Vote to tempban a player for duration days
+      duration: 5         # default: 3 (days)
+  time: 300               # Seconds the voting is open.
+  reminder:               # When to send reminders to people to vote including the current top vote.
+    - 180
+    - 150
+    - 120
+    - 90
+    - 60
+    - 30
+  voting_threshold: 0.25  # 25% of all players have to vote for the vote to count

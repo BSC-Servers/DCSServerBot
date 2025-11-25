@@ -1,0 +1,305 @@
+Kevin-Server-2:
+  use_upnp: true
+  listen_port: 10042
+  DCS:
+    installation: D:\DCS World Server
+    autoupdate: true
+  database:
+    url: 
+      postgres://dcsserverbot:SECRET@127.0.0.1:5432/dcsserverbot?sslmode=prefer
+  instances:
+    Syria:
+      home: C:\Users\kevin\Saved Games\Syria
+      bot_port: 6667
+      max_hung_minutes: 2       # Let DCSServerBot kill your server if it is unresponsive for more than x minutes. Default is 3. Disable it with 0.
+      priority: high
+      extensions:
+        RealWeather:
+          enabled: true    # optional to disable the extension, default: true
+          debug: true      # see outputs of RealWeather, default: false
+          options:
+            log:
+              enable: true
+              file: realweather.log
+            weather:
+              enable: true
+              icao: OSDI
+               #icao-list:      # mutually exclusive with icao above!
+               #  - xxxx
+               #  - yyyy
+              runway-elevation: 20
+            wind:
+              enable: true
+              minimum: 0
+              maximum: 10
+              gust-minimum: 0
+              gust-maximum: 1
+              stability: 0.143
+              fixed-reference: false
+            clouds:
+              enable: true
+              fallback-to-legacy: true
+              base:
+                minimum: 0
+                maximum: 15000
+              presets:
+                default: Preset8
+            fog:
+              enable: true
+              mode: auto
+              thickness-minimum: 0
+              thickness-maximum: 1000
+              visibility-minimum: 0
+              visibility-maximum: 6000
+            dust:
+              enable: true
+              visibility-minimum: 300
+              visibility-maximum: 5000
+            temperature:
+              enable: true
+            pressure:
+              enable: true
+            time:
+              enable: false
+              system-time: true
+            date:
+              enable: true
+              system-date: true
+    Caucasus:
+      home: C:\Users\kevin\Saved Games\Caucasus
+      bot_port: 6666
+      max_hung_minutes: 2       # Let DCSServerBot kill your server if it is unresponsive for more than x minutes. Default is 3. Disable it with 0.
+      priority: high
+#      affinity: 4,5,6,7
+      extensions:
+        RealWeather:
+          enabled: true    # optional to disable the extension, default: true
+          debug: true      # see outputs of RealWeather, default: false
+          options:
+            log:
+              enable: true
+              file: realweather.log
+            weather:
+              enable: true
+              icao: UGTB
+               #icao-list:      # mutually exclusive with icao above!
+               #  - xxxx
+               #  - yyyy
+              runway-elevation: 20
+            wind:
+              enable: true
+              minimum: 0
+              maximum: 10
+              gust-minimum: 0
+              gust-maximum: 1
+              stability: 0.143
+              fixed-reference: false
+            clouds:
+              enable: true
+              fallback-to-legacy: true
+              base:
+                minimum: 0
+                maximum: 15000
+              presets:
+                default: Preset8
+            fog:
+              enable: true
+              mode: auto
+              thickness-minimum: 0
+              thickness-maximum: 1000
+              visibility-minimum: 0
+              visibility-maximum: 6000
+            dust:
+              enable: true
+              visibility-minimum: 300
+              visibility-maximum: 5000
+            temperature:
+              enable: true
+            pressure:
+              enable: true
+            time:
+              enable: false
+              system-time: true
+            date:
+              enable: true
+              system-date: true
+    Syria CW:
+      home: C:\Users\kevin\Saved Games\Syria CW
+      bot_port: 6668
+      max_hung_minutes: 2       # Let DCSServerBot kill your server if it is unresponsive for more than x minutes. Default is 3. Disable it with 0.
+      priority: high
+#      affinity: 8,9,10,11
+      extensions:
+        RealWeather:
+          enabled: true
+          debug: true
+          options:
+            log:
+              enable: true
+              file: realweather.log
+            weather:
+              enable: true
+              icao: OSDI
+               #icao-list:      # mutually exclusive with icao above!
+               #  - xxxx
+               #  - yyyy
+              runway-elevation: 20
+            wind:
+              enable: true
+              minimum: 0
+              maximum: 10
+              gust-minimum: 0
+              gust-maximum: 1
+              stability: 0.143
+              fixed-reference: false
+            clouds:
+              enable: true
+              fallback-to-legacy: true
+              base:
+                minimum: 0
+                maximum: 15000
+              presets:
+                default: Preset8
+            fog:
+              enable: true
+              mode: auto
+              thickness-minimum: 0
+              thickness-maximum: 1000
+              visibility-minimum: 0
+              visibility-maximum: 6000
+            dust:
+              enable: true
+              visibility-minimum: 300
+              visibility-maximum: 5000
+            temperature:
+              enable: true
+            pressure:
+              enable: true
+            time:
+              enable: false
+              system-time: true
+            date:
+              enable: false
+              system-date: true
+    CWG:
+      home: C:\Users\kevin\Saved Games\CWG
+      bot_port: 6670
+      max_hung_minutes: 2       # Let DCSServerBot kill your server if it is unresponsive for more than x minutes. Default is 3. Disable it with 0.
+      priority: high
+#      affinity: 12,13,14,15
+      extensions:
+        RealWeather:
+          enabled: true
+          debug: true
+          options:
+            log:
+              enable: true
+              file: realweather.log
+            weather:
+              enable: true
+              icao: EDDF
+               #icao-list:      # mutually exclusive with icao above!
+               #  - xxxx
+               #  - yyyy
+              runway-elevation: 300
+            wind:
+              enable: true
+              minimum: 0
+              maximum: 10
+              gust-minimum: 0
+              gust-maximum: 1
+              stability: 0.143
+              fixed-reference: false
+            clouds:
+              enable: true
+              fallback-to-legacy: true
+              base:
+                minimum: 0
+                maximum: 15000
+              presets:
+                default: Preset8
+            fog:
+              enable: true
+              mode: auto
+              thickness-minimum: 0
+              thickness-maximum: 1000
+              visibility-minimum: 0
+              visibility-maximum: 6000
+            dust:
+              enable: true
+              visibility-minimum: 300
+              visibility-maximum: 5000
+            temperature:
+              enable: true
+            pressure:
+              enable: true
+            time:
+              enable: false
+              system-time: true
+            date:
+              enable: false
+              system-date: true
+    Persian Gulf:
+      home: C:\Users\kevin\Saved Games\Persian Gulf
+      bot_port: 6669
+      max_hung_minutes: 2       # Let DCSServerBot kill your server if it is unresponsive for more than x minutes. Default is 3. Disable it with 0.
+      priority: high
+#      affinity: 4,5,6,7
+      extensions:
+        RealWeather:
+          enabled: true    # optional to disable the extension, default: true
+          debug: true      # see outputs of RealWeather, default: false
+          options:
+            log:
+              enable: true
+              file: realweather.log
+            weather:
+              enable: true
+              icao: OMDB
+               #icao-list:      # mutually exclusive with icao above!
+               #  - xxxx
+               #  - yyyy
+              runway-elevation: 20
+            wind:
+              enable: true
+              minimum: 0
+              maximum: 10
+              gust-minimum: 0
+              gust-maximum: 1
+              stability: 0.143
+              fixed-reference: false
+            clouds:
+              enable: true
+              fallback-to-legacy: true
+              base:
+                minimum: 0
+                maximum: 15000
+              presets:
+                default: Preset8
+            fog:
+              enable: true
+              mode: auto
+              thickness-minimum: 0
+              thickness-maximum: 1000
+              visibility-minimum: 0
+              visibility-maximum: 6000
+            dust:
+              enable: true
+              visibility-minimum: 300
+              visibility-maximum: 5000
+            temperature:
+              enable: true
+            pressure:
+              enable: true
+            time:
+              enable: false
+              system-time: true
+            date:
+              enable: true
+              system-date: true
+    Kola:
+      home: C:\Users\kevin\Saved Games\Kola
+      bot_port: 6671
+  extensions:
+    RealWeather:
+      installation: C:\Users\kevin\OneDrive\Games\DCS\realweather_v2.4.0

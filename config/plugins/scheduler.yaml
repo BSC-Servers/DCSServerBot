@@ -1,0 +1,110 @@
+DEFAULT:
+  startup_delay: 15                              # delay in seconds between the startup of each DCS instance (default: 10)
+  warn:                                           
+    text: '!!! {item} will {what} in {when} !!!'
+    times:                                        
+    - 1800
+    - 1500
+    - 1200
+    - 900
+    - 600
+    - 420
+    - 300
+    - 240
+    - 180
+    - 120
+    - 60
+    - 30
+    - 10
+Caucasus:
+  schedule:
+    00-24: YYYYYYY
+  action:                                        # at 04:00 and 08:00 LT ..
+    - method: restart
+      populated: true
+      local_times:
+      - 00:05
+      - 14:10
+      shutdown: true
+    - method: restart
+      mission_end: true    
+      populated: true
+      shutdown: true
+    - method: shutdown
+      populated: true
+      local_times:
+      - 05:58
+Syria:
+  schedule:
+    00-24: YYYYYYY
+  action:                                   # at 04:00 and 08:00 LT ..
+    - method: restart
+      populated: true
+      local_times:
+      - 00:00
+      - 14:05
+      shutdown: true
+    - method: restart
+      mission_end: true    
+      populated: true
+      shutdown: true
+    - method: shutdown
+      populated: true
+      local_times:
+      - 05:58
+Syria CW:
+  schedule:
+    00-24: YYYYYYY
+  action:                                   # at 04:00 and 08:00 LT ..
+    - method: restart
+      populated: true
+      local_times:
+      - 13:55
+      - 23:55
+      shutdown: true
+    - method: restart
+      mission_end: true    
+      populated: true
+      shutdown: true
+    - method: shutdown
+      populated: true
+      local_times:
+      - 05:58
+CWG:
+  schedule:
+    00-24: YYYYYYY
+  action:                                   # at 04:00 and 08:00 LT ..
+    - method: restart
+      populated: true
+      local_times:
+      - 00:00
+      - 09:00
+      - 11:55
+      - 18:00
+      shutdown: true
+    - method: restart
+      mission_end: true    
+      populated: true
+      shutdown: true
+    - method: shutdown
+      populated: true
+      local_times:
+      - 05:58
+Persian Gulf:
+  schedule:
+    00-24: YYYYYYY
+  action:                                        # at 04:00 and 08:00 LT ..
+    - method: restart
+      populated: true
+      local_times:
+      - 00:10
+      - 13:50
+      shutdown: true
+    - method: restart
+      mission_end: true    
+      populated: true
+      shutdown: true
+    - method: shutdown
+      populated: true
+      local_times:
+      - 05:58

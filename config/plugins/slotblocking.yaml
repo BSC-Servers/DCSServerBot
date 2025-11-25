@@ -1,0 +1,6 @@
+DEFAULT: 
+  VIP:
+    discord: 
+     - Linked
+    slots: 5
+    message_server_full: 'All public Slots are used, please try again later or join our Discord and link your Account for reserved slots: https://discord.gg/aZ2a7msG6G'

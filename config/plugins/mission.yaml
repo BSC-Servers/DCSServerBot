@@ -1,0 +1,3 @@
+DEFAULT:
+  uploads:          # Configure how mission uploads are handled
+    enabled: true   # Here you can disable the feature at all (default: true = enabled)

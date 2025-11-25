@@ -1,0 +1,20 @@
+owner: 268087892037992458
+discord_status: /help
+automatch: true
+autorole:
+  on_join: Players
+  linked: Linked
+  online: Online
+roles:
+  Admin:
+  - Admins
+  - Mission Editor
+  DCS Admin:
+  - Moderator
+  - Mission Editor
+  DCS:
+  - '@everyone'
+channels:
+  audit: 1226327767520645232
+  admin: 1226327911192072223
+

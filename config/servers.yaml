@@ -1,0 +1,49 @@
+DEFAULT:
+  messages:
+    message_player_username: Your player name contains invalid characters. 
+      Please change your name to join our server.
+    message_player_default_username: Please change your default player name at 
+      the top right of the multiplayer selection list to an individual one!
+    message_ban: 'You are banned from this server. Reason: {}'
+    message_no_voice: You need to be in voice channel "{}" to use this server!
+  slot_spamming:
+    message: You have been kicked for slot spamming!
+    check_time: 5
+    slot_changes: 5
+  afk:
+    message: '{player.name}, you have been kicked for being AFK for more than {time}.'
+    afk_time: 1200
+    exemptions:
+      discord:
+      - Admins
+      - Mission Editor
+      - Moderator
+BSC | Dynamic PvE Campaign | Caucasus | Pretense / RealWX:
+  smooth_pause: 30
+  channels:
+    status: 1219263773282402324
+    chat: 1219032852595998820
+BSC | Dynamic PvE Campaign | Syria | Pretense / RealWX:
+  smooth_pause: 30
+  channels:
+    status: 1219263773282402324
+    chat: 1219032868890607676
+BSC | Cold War PvE Campaign | Syria | Pretense / RealWX:
+  smooth_pause: 30
+  channels:
+    status: 1219263773282402324
+    chat: 1243135440354148454
+BSC | Cold War PvE Campaign | Germany | Pretense / RealWX:
+  smooth_pause: 30
+  channels:
+    status: 1219263773282402324
+    chat: 1383473856731156580
+BSC | Dynamic PvE Campaign | Persian Gulf | Pretense / RealWX:
+  smooth_pause: 30
+  channels:
+    status: 1219263773282402324
+    chat: 1238899942081433611
+BSC | Dynamic PvE Campaign | Kola | Pretense / RealWX:
+  channels:
+    status: 1219263773282402324
+    chat: 1407697237181464726

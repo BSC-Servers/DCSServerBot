@@ -1,0 +1,25 @@
+Syria:
+  enabled: true
+  display: false
+  persistence: true
+  persist_ai_statistics: false
+Caucasus:
+  enabled: true
+  display: false
+  persistence: true
+  persist_ai_statistics: false
+Persian Gulf:
+  enabled: true
+  display: false
+  persistence: true
+  persist_ai_statistics: false
+Syria CW:
+  enabled: true
+  display: false
+  persistence: true
+  persist_ai_statistics: false
+CWG:
+  enabled: true
+  display: false
+  persistence: true
+  persist_ai_statistics: false
