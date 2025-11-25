@@ -19,6 +19,9 @@ class Pretense(Plugin):
     def __init__(self, bot: DCSServerBot):
         super().__init__(bot)
         self.last_mtime = dict()
+        # Persist highest known ranks across leaderboard updates to avoid flapping role assignments
+        # when servers are restarted or their player stats files temporarily disappear.
+        self.highest_ranks: dict[str, int] = {}
 
     async def cog_load(self) -> None:
         await super().cog_load()
@@ -95,7 +98,11 @@ class Pretense(Plugin):
     @tasks.loop(seconds=120)
     async def update_leaderboard(self):
         rank_roles = self.get_config().get('rank_roles', {}) or {}
-        highest_ranks = dict() if rank_roles else None
+        if rank_roles:
+            highest_ranks = self.highest_ranks
+        else:
+            self.highest_ranks = {}
+            highest_ranks = None
         for server in self.bot.servers.values():
             try:
                 if server.status != Status.RUNNING:
