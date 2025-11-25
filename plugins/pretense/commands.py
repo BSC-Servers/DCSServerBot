@@ -228,7 +228,10 @@ class Pretense(Plugin):
                 continue
             desired_role = rank_roles.get(level)
             roles_to_remove = [role for lvl, role in rank_roles.items()
-                               if role in member.roles and lvl != level]
+                               if role in member.roles and lvl != level and role != desired_role]
+            if not roles_to_remove and desired_role in member.roles:
+                # Member already has the correct role and no other rank roles to clean up.
+                continue
             try:
                 if roles_to_remove:
                     await member.remove_roles(*roles_to_remove)
