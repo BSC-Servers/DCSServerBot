@@ -9,6 +9,8 @@ from discord.utils import MISSING
 from services.bot import DCSServerBot
 from typing import Literal
 
+from .const import RANK_CODES, get_rank_for_xp
+
 _ = get_translation(__name__.split('.')[1])
 
 
@@ -92,6 +94,8 @@ class Pretense(Plugin):
 
     @tasks.loop(seconds=120)
     async def update_leaderboard(self):
+        rank_roles = self.get_config().get('rank_roles', {}) or {}
+        highest_ranks = dict() if rank_roles else None
         for server in self.bot.servers.values():
             try:
                 if server.status != Status.RUNNING:
@@ -111,12 +115,19 @@ class Pretense(Plugin):
                     continue
                 content = file_data.decode(encoding='utf-8')
                 data = json.loads(content)
+                if highest_ranks is not None:
+                    ranks = self._collect_player_ranks(data)
+                    for ucid, rank in ranks.items():
+                        if rank > highest_ranks.get(ucid, 0):
+                            highest_ranks[ucid] = rank
                 report = PersistentReport(self.bot, self.plugin_name, "pretense.json", embed_name="leaderboard",
                                           channel_id=config.get('channel', server.channels[Channel.STATUS]),
                                           server=server)
                 await report.render(data=data, server=server)
             except Exception as ex:
                 self.log.exception(ex)
+        if highest_ranks is not None:
+            await self._apply_rank_roles(highest_ranks, rank_roles)
 
     @update_leaderboard.before_loop
     async def before_check(self):
@@ -159,6 +170,67 @@ class Pretense(Plugin):
             finally:
                 await message.delete()
 
+    @staticmethod
+    def _collect_player_ranks(data: dict) -> dict[str, int]:
+        ranks = {}
+        stats = data.get("stats", {})
+        if not isinstance(stats, dict):
+            return ranks
+        for player, player_stats in stats.items():
+            if not isinstance(player_stats, dict):
+                continue
+            xp = player_stats.get("XP")
+            if xp is None:
+                continue
+            try:
+                xp = int(xp)
+            except (TypeError, ValueError):
+                continue
+            ucid = player if utils.is_ucid(player) else player_stats.get("ucid")
+            if not utils.is_ucid(ucid):
+                continue
+            rank, _ = get_rank_for_xp(xp)
+            if rank is None:
+                continue
+            if rank > ranks.get(ucid, 0):
+                ranks[ucid] = rank
+        return ranks
+
+    async def _apply_rank_roles(self, ranks: dict[str, int], role_config: dict) -> None:
+        if not ranks:
+            return
+        if not self.bot.guilds:
+            return
+        rank_roles: dict[int, discord.Role] = {}
+        for rank_code, role_id in role_config.items():
+            rank_code = str(rank_code).upper()
+            level = RANK_CODES.get(rank_code)
+            if not level:
+                self.log.warning("Pretense: Unknown rank code %s in configuration.", rank_code)
+                continue
+            role = self.bot.get_role(role_id)
+            if not role:
+                self.log.warning("Pretense: Discord role %s for rank %s not found.", role_id, rank_code)
+                continue
+            rank_roles[level] = role
+        if not rank_roles:
+            return
+        for ucid, level in ranks.items():
+            member = self.bot.get_member_by_ucid(ucid, verified=True)
+            if not member:
+                continue
+            desired_role = rank_roles.get(level)
+            roles_to_remove = [role for lvl, role in rank_roles.items()
+                               if role in member.roles and lvl != level]
+            try:
+                if roles_to_remove:
+                    await member.remove_roles(*roles_to_remove)
+                if desired_role and desired_role not in member.roles:
+                    await member.add_roles(desired_role)
+            except discord.Forbidden:
+                await self.bot.audit('permission "Manage Roles" missing.', user=self.bot.member)
+            except discord.HTTPException as ex:
+                self.log.exception(ex)
 
 
 async def setup(bot: DCSServerBot):

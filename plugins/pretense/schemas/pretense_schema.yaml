@@ -14,6 +14,11 @@ schema;element_schema:
     update_interval: {type: int, range: {min: 60}, nullable: false}
     json_file_path: {type: str, nullable: false, range: {min: 1}, func: file_exists}
     channel: {type: int, nullable: false}
+    rank_roles:
+      type: map
+      nullable: true
+      mapping:
+        regex;(.+): {type: any, nullable: false}
 
 type: map
 func: check_main_structure
