@@ -353,7 +353,7 @@ Kevin-Server-2:
               enable: false
               system-time: true
             date:
-              enable: true
+              enable: false
               system-date: true
   extensions:
     RealWeather:
