@@ -34,3 +34,7 @@ CWG:
     delay: 2000               # the following message will be displayed every 3600 seconds (1h)
     message: 'This mission is still WIP. Help us shape it by providing Feedback on feedback.bscservers.ch'
     display_type: chat
+Kola:
+  on_join:                    # The message will be displayed in the in-game chat on join of the server.
+    message: Select the Dynamic Slots tab to join! To view stats and highscores,
+      join our discord at discord.bscservers.ch. A server manual is available at manual.bscservers.ch
