@@ -10,3 +10,5 @@ Persian Gulf:
   enabled: true  # we disable statistics gathering on instance2
 CWG:
   enabled: false  # we disable statistics gathering on instance2
+Kola:
+  enabled: false  # we disable statistics gathering on instance2

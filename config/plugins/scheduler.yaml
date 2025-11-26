@@ -108,3 +108,21 @@ Persian Gulf:
       populated: true
       local_times:
       - 05:58
+Kola:
+  schedule:
+    00-24: YYYYYYY
+  action:                                        # at 04:00 and 08:00 LT ..
+    - method: restart
+      populated: true
+      local_times:
+      - 00:50
+      - 15:00
+      shutdown: true
+    - method: restart
+      mission_end: true    
+      populated: true
+      shutdown: true
+    - method: shutdown
+      populated: true
+      local_times:
+      - 05:58

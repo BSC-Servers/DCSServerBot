@@ -34,3 +34,6 @@ CWG:
 Persian Gulf:
   json_file_path: '{instance.home}\Missions\Saves\player_stats_ucid.json' # this is the default
   channel: 1239283281883693126   # channel, where to upload the stats into (default: Status channel)
+Kola:
+  json_file_path: '{instance.home}\Missions\Saves\player_stats_ucid.json' # this is the default
+  channel: 1443055434544971936   # channel, where to upload the stats into (default: Status channel)

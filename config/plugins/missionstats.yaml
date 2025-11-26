@@ -23,3 +23,8 @@ CWG:
   display: false
   persistence: true
   persist_ai_statistics: false
+Kola:
+  enabled: true
+  display: false
+  persistence: true
+  persist_ai_statistics: false

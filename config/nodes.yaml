@@ -300,6 +300,61 @@ Kevin-Server-2:
     Kola:
       home: C:\Users\kevin\Saved Games\Kola
       bot_port: 6671
+      max_hung_minutes: 2       # Let DCSServerBot kill your server if it is unresponsive for more than x minutes. Default is 3. Disable it with 0.
+      priority: high
+#      affinity: 4,5,6,7
+      extensions:
+        RealWeather:
+          enabled: true    # optional to disable the extension, default: true
+          debug: true      # see outputs of RealWeather, default: false
+          options:
+            log:
+              enable: true
+              file: realweather.log
+            weather:
+              enable: true
+              icao: EFRO
+               #icao-list:      # mutually exclusive with icao above!
+               #  - xxxx
+               #  - yyyy
+              runway-elevation: 640
+            wind:
+              enable: true
+              minimum: 0
+              maximum: 10
+              gust-minimum: 0
+              gust-maximum: 1
+              stability: 0.143
+              fixed-reference: false
+            clouds:
+              enable: true
+              fallback-to-legacy: true
+              base:
+                minimum: 0
+                maximum: 15000
+              presets:
+                default: Preset8
+            fog:
+              enable: true
+              mode: auto
+              thickness-minimum: 0
+              thickness-maximum: 1000
+              visibility-minimum: 0
+              visibility-maximum: 6000
+            dust:
+              enable: true
+              visibility-minimum: 300
+              visibility-maximum: 5000
+            temperature:
+              enable: true
+            pressure:
+              enable: true
+            time:
+              enable: false
+              system-time: true
+            date:
+              enable: true
+              system-date: true
   extensions:
     RealWeather:
       installation: C:\Users\kevin\OneDrive\Games\DCS\realweather_v2.4.0
