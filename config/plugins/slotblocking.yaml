@@ -1,6 +1,11 @@
 DEFAULT: 
   VIP:
     discord: 
-     - Linked
-    slots: 10
+       - Linked
+    slots: 5
     message_server_full: 'All public Slots are used, please try again later or join our Discord and link your Account for reserved slots: discord.bscservers.ch'
+  restricted:       # These slots are restricted in any way. Here we restrict CA slots for Donators or members or the Discord.
+  - unit_type: artillery_commander
+    discord:
+      - O-10 General
+    message: To use the tactical Commander slot, you need to be Rank O-10 General!
