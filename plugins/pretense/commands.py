@@ -75,10 +75,10 @@ class Pretense(Plugin):
     @utils.app_has_role('DCS Admin')
     @app_commands.guild_only()
     async def reset(self, interaction: discord.Interaction,
+                    what: Literal['persistence', 'statistics', 'roles', 'all'],
                     server: app_commands.Transform[
                         Server, utils.ServerTransformer(status=[Status.STOPPED, Status.SHUTDOWN])
-                    ] | None = None,
-                    what: Literal['persistence', 'statistics', 'roles', 'all']):
+                    ] | None = None):
         if what in ['persistence', 'statistics', 'all'] and not server:
             await interaction.response.send_message(
                 _("Please specify a server to reset persistence or statistics."),
