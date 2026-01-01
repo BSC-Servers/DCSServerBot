@@ -75,10 +75,17 @@ class Pretense(Plugin):
     @utils.app_has_role('DCS Admin')
     @app_commands.guild_only()
     async def reset(self, interaction: discord.Interaction,
-                    server: app_commands.Transform[Server, utils.ServerTransformer(status=[
-                        Status.STOPPED, Status.SHUTDOWN])],
+                    server: app_commands.Transform[
+                        Server, utils.ServerTransformer(status=[Status.STOPPED, Status.SHUTDOWN])
+                    ] | None = None,
                     what: Literal['persistence', 'statistics', 'roles', 'all']):
-        if server.status not in [Status.STOPPED, Status.SHUTDOWN]:
+        if what in ['persistence', 'statistics', 'all'] and not server:
+            await interaction.response.send_message(
+                _("Please specify a server to reset persistence or statistics."),
+                ephemeral=True
+            )
+            return
+        if server and server.status not in [Status.STOPPED, Status.SHUTDOWN]:
             # noinspection PyUnresolvedReferences
             await interaction.response.send_message(
                 _("Server {} needs to be shut down to reset the Pretense progress!").format(server.display_name),
