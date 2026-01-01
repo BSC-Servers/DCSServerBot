@@ -76,7 +76,8 @@ class Pretense(Plugin):
     @app_commands.guild_only()
     async def reset(self, interaction: discord.Interaction,
                     server: app_commands.Transform[Server, utils.ServerTransformer(status=[
-                        Status.STOPPED, Status.SHUTDOWN])], what: Literal['persistence', 'statistics', 'both']):
+                        Status.STOPPED, Status.SHUTDOWN])],
+                    what: Literal['persistence', 'statistics', 'roles', 'all']):
         if server.status not in [Status.STOPPED, Status.SHUTDOWN]:
             # noinspection PyUnresolvedReferences
             await interaction.response.send_message(
@@ -86,14 +87,42 @@ class Pretense(Plugin):
         ephemeral = utils.get_ephemeral(interaction)
         if not await utils.yn_question(interaction, _("Do you really want to reset the Pretense progress?")):
             await interaction.followup.send(_("Aborted."), ephemeral=ephemeral)
-        if what == 'persistence' or what == 'both':
+        if what == 'persistence' or what == 'all':
             path = os.path.join(await server.get_missions_dir(), 'Saves', "pretense_*.json")
             await server.node.remove_file(path)
             await interaction.followup.send(_("Pretense persistence reset."), ephemeral=ephemeral)
-        if what == 'statistics' or what == 'both':
+        if what == 'statistics' or what == 'all':
             path = os.path.join(await server.get_missions_dir(), 'Saves', "player_stats*.json")
             await server.node.remove_file(path)
             await interaction.followup.send(_("Pretense statistics reset."), ephemeral=ephemeral)
+        if what == 'roles' or what == 'all':
+            rank_roles = self.get_config().get('rank_roles', {}) or {}
+            if not rank_roles:
+                await interaction.followup.send(_("No Pretense rank roles configured."), ephemeral=ephemeral)
+                return
+            roles_to_clear = []
+            for role_id in rank_roles.values():
+                role = self.bot.get_role(role_id)
+                if not role:
+                    self.log.warning("Pretense: Discord role %s not found.", role_id)
+                    continue
+                roles_to_clear.append(role)
+            if not roles_to_clear:
+                await interaction.followup.send(_("No Pretense rank roles found to reset."), ephemeral=ephemeral)
+                return
+            members_to_roles = {}
+            for role in roles_to_clear:
+                for member in role.members:
+                    members_to_roles.setdefault(member, []).append(role)
+            for member, roles in members_to_roles.items():
+                try:
+                    await member.remove_roles(*roles)
+                except discord.Forbidden:
+                    await self.bot.audit('permission "Manage Roles" missing.', user=self.bot.member)
+                    break
+                except discord.HTTPException as ex:
+                    self.log.exception(ex)
+            await interaction.followup.send(_("Pretense rank roles reset."), ephemeral=ephemeral)
 
     @tasks.loop(seconds=120)
     async def update_leaderboard(self):
