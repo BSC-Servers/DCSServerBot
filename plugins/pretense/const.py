@@ -5,24 +5,24 @@ _ = get_translation(__name__.split('.')[1])
 
 PRETENSE_RANKS = {
     1: {"code": "E-1", "name": _("E-1 Airman basic"), "requiredXP": 0},
-    2: {"code": "E-2", "name": _("E-2 Airman"), "requiredXP": 2000},
-    3: {"code": "E-3", "name": _("E-3 Airman first class"), "requiredXP": 4500},
-    4: {"code": "E-4", "name": _("E-4 Senior airman"), "requiredXP": 7700},
-    5: {"code": "E-5", "name": _("E-5 Staff sergeant"), "requiredXP": 11800},
-    6: {"code": "E-6", "name": _("E-6 Technical sergeant"), "requiredXP": 20000},
-    7: {"code": "E-7", "name": _("E-7 Master sergeant"), "requiredXP": 25000},
-    8: {"code": "E-8", "name": _("E-8 Senior master sergeant"), "requiredXP": 35000},
-    9: {"code": "E-9", "name": _("E-9 Chief master sergeant"), "requiredXP": 45000},
-    10: {"code": "O-1", "name": _("O-1 Second lieutenant"), "requiredXP": 60000},
-    11: {"code": "O-2", "name": _("O-2 First lieutenant"), "requiredXP": 70000},
-    12: {"code": "O-3", "name": _("O-3 Captain"), "requiredXP": 90000},
-    13: {"code": "O-4", "name": _("O-4 Major"), "requiredXP": 100000},
-    14: {"code": "O-5", "name": _("O-5 Lieutenant colonel"), "requiredXP": 125000},
-    15: {"code": "O-6", "name": _("O-6 Colonel"), "requiredXP": 150000},
-    16: {"code": "O-7", "name": _("O-7 Brigadier general"), "requiredXP": 170000},
-    17: {"code": "O-8", "name": _("O-8 Major general"), "requiredXP": 200000},
-    18: {"code": "O-9", "name": _("O-9 Lieutenant general"), "requiredXP": 240000},
-    19: {"code": "O-10", "name": _("O-10 General"), "requiredXP": 300000}
+    2: {"code": "E-2", "name": _("E-2 Airman"), "requiredXP": 2416},
+    3: {"code": "E-3", "name": _("E-3 Airman first class"), "requiredXP": 10008},
+    4: {"code": "E-4", "name": _("E-4 Senior airman"), "requiredXP": 22980},
+    5: {"code": "E-5", "name": _("E-5 Staff sergeant"), "requiredXP": 41445},
+    6: {"code": "E-6", "name": _("E-6 Technical sergeant"), "requiredXP": 65484},
+    7: {"code": "E-7", "name": _("E-7 Master sergeant"), "requiredXP": 95161},
+    8: {"code": "E-8", "name": _("E-8 Senior master sergeant"), "requiredXP": 130528},
+    9: {"code": "E-9", "name": _("E-9 Chief master sergeant"), "requiredXP": 171627},
+    10: {"code": "O-1", "name": _("O-1 Second lieutenant"), "requiredXP": 218499},
+    11: {"code": "O-2", "name": _("O-2 First lieutenant"), "requiredXP": 271177},
+    12: {"code": "O-3", "name": _("O-3 Captain"), "requiredXP": 329691},
+    13: {"code": "O-4", "name": _("O-4 Major"), "requiredXP": 394071},
+    14: {"code": "O-5", "name": _("O-5 Lieutenant colonel"), "requiredXP": 464341},
+    15: {"code": "O-6", "name": _("O-6 Colonel"), "requiredXP": 540524},
+    16: {"code": "O-7", "name": _("O-7 Brigadier general"), "requiredXP": 622644},
+    17: {"code": "O-8", "name": _("O-8 Major general"), "requiredXP": 710721},
+    18: {"code": "O-9", "name": _("O-9 Lieutenant general"), "requiredXP": 804773},
+    19: {"code": "O-10", "name": _("O-10 General"), "requiredXP": 904819}
 }
 
 RANK_CODES = {rank["code"]: level for level, rank in PRETENSE_RANKS.items()}
