@@ -10,6 +10,7 @@ from services.cron.actions import purge_channel
 
 @ServiceRegistry.register()
 class CleanupService(Service):
+
     def __init__(self, node):
         super().__init__(node=node, name="Cleanup")
         self.bot = None
@@ -76,7 +77,7 @@ class CleanupService(Service):
             return
         if self.node.master:
             asyncio.create_task(self.do_cleanup())
-        for instance in self.node.instances:
+        for instance in self.node.instances.values():
             asyncio.create_task(self.do_cleanup(instance))
 
     @schedule.before_loop

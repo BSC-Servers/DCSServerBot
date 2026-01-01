@@ -21,6 +21,7 @@ from psycopg.errors import UniqueViolation
 from psycopg.rows import dict_row
 from services.bot import DCSServerBot
 from time import time
+from typing import Type
 
 from .const import TOURNAMENT_PHASE
 from .listener import TournamentEventListener
@@ -79,7 +80,7 @@ async def squadron_autocomplete(interaction: discord.Interaction, current: str,
         ucid = None
         squadron_admin_sql = ""
 
-    tournament_id = utils.get_interaction_param(interaction, "tournament")
+    tournament_id = interaction.namespace.tournament
     if config == 'all':
         sub_query = ""
     elif config == 'reject':
@@ -122,7 +123,7 @@ async def valid_squadron_autocomplete(interaction: discord.Interaction, current:
 async def stage_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[int]]:
     if not await interaction.command._check_can_run(interaction):
         return []
-    tournament_id = utils.get_interaction_param(interaction, "tournament")
+    tournament_id = interaction.namespace.tournament
     async with interaction.client.apool.connection() as conn:
         cursor = await conn.execute("""
             SELECT COALESCE(MAX(stage), 1) 
@@ -139,7 +140,7 @@ async def stage_autocomplete(interaction: discord.Interaction, current: str) -> 
 async def server_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[int]]:
     if not await interaction.command._check_can_run(interaction):
         return []
-    tournament_id = utils.get_interaction_param(interaction, "tournament")
+    tournament_id = interaction.namespace.tournament
     async with interaction.client.apool.connection() as conn:
         choices: list[app_commands.Choice[int]] = [
             app_commands.Choice(name=row[0], value=row[0])
@@ -161,7 +162,7 @@ async def server_autocomplete(interaction: discord.Interaction, current: str) ->
 async def all_matches_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[int]]:
     if not await interaction.command._check_can_run(interaction):
         return []
-    tournament_id = utils.get_interaction_param(interaction, "tournament")
+    tournament_id = interaction.namespace.tournament
     async with interaction.client.apool.connection() as conn:
         choices: list[app_commands.Choice[int]] = [
             app_commands.Choice(name=row[1] + ' vs ' + row[2], value=row[0])
@@ -182,7 +183,7 @@ async def all_matches_autocomplete(interaction: discord.Interaction, current: st
 async def active_matches_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[int]]:
     if not await interaction.command._check_can_run(interaction):
         return []
-    tournament_id = utils.get_interaction_param(interaction, "tournament")
+    tournament_id = interaction.namespace.tournament
     async with interaction.client.apool.connection() as conn:
         choices: list[app_commands.Choice[int]] = [
             app_commands.Choice(name=row[1] + ' vs ' + row[2], value=row[0])
@@ -211,7 +212,7 @@ async def active_matches_autocomplete(interaction: discord.Interaction, current:
 async def match_squadrons_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[int]]:
     if not await interaction.command._check_can_run(interaction):
         return []
-    match_id = utils.get_interaction_param(interaction, "match")
+    match_id = interaction.namespace.match
     async with interaction.client.apool.connection() as conn:
         cursor = await conn.execute("SELECT squadron_blue, squadron_red FROM tm_matches WHERE match_id = %s",
                                     (match_id, ))
@@ -227,7 +228,7 @@ async def match_squadrons_autocomplete(interaction: discord.Interaction, current
 async def mission_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[int]]:
     if not await interaction.command._check_can_run(interaction):
         return []
-    match_id = utils.get_interaction_param(interaction, "match")
+    match_id = interaction.namespace.match
     async with interaction.client.apool.connection() as conn:
         cursor = await conn.execute(f"""
             SELECT server_name FROM tm_matches WHERE match_id = %s
@@ -252,7 +253,7 @@ async def date_autocomplete(interaction: discord.Interaction, current: str) -> l
 
 
 async def time_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[int]]:
-    tournament_id = utils.get_interaction_param(interaction, "tournament")
+    tournament_id = interaction.namespace.tournament
     async with interaction.client.apool.connection() as conn:
         choices: list[app_commands.Choice[int]] = [
             app_commands.Choice(name=row[0].strftime("%H:%M"), value=row[0].hour * 3600 + row[0].minute * 60)
@@ -264,8 +265,8 @@ async def time_autocomplete(interaction: discord.Interaction, current: str) -> l
 
 
 async def tickets_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[int]]:
-    tournament_id = utils.get_interaction_param(interaction, "tournament")
-    squadron_id = utils.get_interaction_param(interaction, "squadron")
+    tournament_id = interaction.namespace.tournament
+    squadron_id = interaction.namespace.squadron
     async with interaction.client.apool.connection() as conn:
         choices: list[app_commands.Choice[int]] = [
             app_commands.Choice(name=row[0], value=row[0])
@@ -280,6 +281,10 @@ async def tickets_autocomplete(interaction: discord.Interaction, current: str) -
 
 class Tournament(Plugin[TournamentEventListener]):
 
+    def __init__(self, bot: DCSServerBot, listener: Type[TournamentEventListener]):
+        super().__init__(bot, listener)
+        self._info_channel: discord.TextChannel | None = None
+
     async def cog_load(self) -> None:
         await super().cog_load()
         if self.get_config().get('autostart_matches', False):
@@ -290,10 +295,8 @@ class Tournament(Plugin[TournamentEventListener]):
     async def cog_unload(self) -> None:
         if self.get_config().get('autostart_matches', False):
             self.match_scheduler.cancel()
+        self._info_channel = None
         await super().cog_unload()
-
-    async def rename(self, conn: psycopg.AsyncConnection, old_name: str, new_name: str):
-        await conn.execute('UPDATE tm_matches SET server_name = %s WHERE server_name = %s', (new_name, old_name))
 
     def get_admin_channel(self):
         config = self.get_config()
@@ -326,11 +329,12 @@ class Tournament(Plugin[TournamentEventListener]):
                 return await cursor.fetchone()
 
     def get_info_channel(self) -> discord.TextChannel | None:
-        config = self.get_config()
-        channel_id = config.get('channels', {}).get('info')
-        if channel_id and self.bot.check_channel(channel_id):
-            return self.bot.get_channel(channel_id)
-        return None
+        if not self._info_channel:
+            config = self.get_config()
+            channel_id = config.get('channels', {}).get('info')
+            if channel_id and self.bot.check_channel(channel_id):
+                self._info_channel = self.bot.get_channel(channel_id)
+        return self._info_channel
 
     async def get_squadron_channel(self, match_id: int, side: str) -> TextChannel | None:
         async with self.apool.connection() as conn:
@@ -871,7 +875,7 @@ class Tournament(Plugin[TournamentEventListener]):
             if admin_channel:
                 await admin_channel.send(_("Squadron {} signed up for tournament {}, you can now {} them.").format(
                     squadron['name'], tournament['name'],
-                    (await utils.get_command(self.bot, group='tournament', name='verify')).mention))
+                    (await utils.get_command(self.bot, group=self.tournament.name, name=self.verify.name)).mention))
         except UniqueViolation:
             # noinspection PyUnresolvedReferences
             await interaction.followup.send(_("Squadron already signed up for tournament."), ephemeral=True)
@@ -1483,7 +1487,7 @@ class Tournament(Plugin[TournamentEventListener]):
             'red': utils.get_squadron(self.node, squadron_id=match['squadron_red'])
         }
 
-        # back-up the serversettings.lua
+        # back up the serversettings.lua
         filename = os.path.join(server.instance.home, 'Config', 'serverSettings.lua')
         orig_file = filename + '.orig'
         if not os.path.exists(orig_file):
@@ -1501,7 +1505,7 @@ class Tournament(Plugin[TournamentEventListener]):
         server.locals['channels']['blue'] = channels['blue']
         server.locals['channels']['red'] = channels['red']
 
-        # setup streamer channel (replicates all events from red and blue)
+        # set up streamer channel (replicates all events from red and blue)
         streamer_channel = config.get('channels', {}).get('streamer')
         if streamer_channel:
             server.locals['channels']['blue_events'] = streamer_channel
@@ -1572,7 +1576,7 @@ class Tournament(Plugin[TournamentEventListener]):
                               mission_id: int | None = None) -> str:
         config = self.get_config(server)
         # set startindex or use last mission
-        if mission_id is not None and server.settings['listStartIndex'] != mission_id + 1:
+        if mission_id is not None and server.settings['listStartIndex'] != (mission_id + 1):
             await server.setStartIndex(mission_id + 1)
 
         # change the mission

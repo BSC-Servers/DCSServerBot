@@ -1,7 +1,6 @@
 import asyncio
 import discord
 import os
-import psycopg
 
 from core import (Plugin, PluginInstallationError, Status, Group, utils, Server, ServiceRegistry, get_translation,
                   NodeUploadHandler, Channel)
@@ -66,7 +65,7 @@ async def songs_autocomplete(interaction: discord.Interaction, current: str) -> 
     try:
         service = ServiceRegistry.get(MusicService)
         music_dir = await service.get_music_dir()
-        playlist = await Playlist.create(utils.get_interaction_param(interaction, 'playlist'))
+        playlist = await Playlist.create(interaction.namespace.playlist)
         ret = []
         for song in playlist.items:
             title = get_tag(os.path.join(music_dir, song)).title or song
@@ -83,8 +82,7 @@ async def radios_autocomplete(interaction: discord.Interaction, current: str) ->
     if not await interaction.command._check_can_run(interaction):
         return []
     try:
-        server: Server = await utils.ServerTransformer().transform(
-            interaction, utils.get_interaction_param(interaction, 'server'))
+        server: Server = await utils.ServerTransformer().transform(interaction, interaction.namespace.server)
         if not server:
             return []
         service = ServiceRegistry.get(MusicService)
@@ -131,13 +129,6 @@ class Music(Plugin[MusicEventListener]):
             return super().get_config(server, plugin_name=plugin_name, use_cache=use_cache)
         return self.service.get_config(server)
 
-    async def prune(self, conn: psycopg.AsyncConnection, *, days: int = -1, ucids: list[str] = None,
-                    server: str | None = None) -> None:
-        self.log.debug('Pruning Music ...')
-        if server:
-            await conn.execute("DELETE FROM music_radios WHERE server_name = %s", (server, ))
-        self.log.debug('Music pruned.')
-
     # New command group "/music"
     music = Group(name="music", description=_("Commands to manage music in your (DCS) server"))
 
@@ -155,7 +146,7 @@ class Music(Plugin[MusicEventListener]):
             # noinspection PyUnresolvedReferences
             await interaction.response.send_message(
                 _("You don't have any playlists to play. Please create one with {}.").format(
-                    (await utils.get_command(self.bot, group='playlist', name='add')).mention
+                    (await utils.get_command(self.bot, group=self.plgroup.name, name=self.add.name)).mention
                 ), ephemeral=True)
             return
         view = MusicPlayer(server=_server, radio_name=radio_name, playlists=playlists)

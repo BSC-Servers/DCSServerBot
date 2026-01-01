@@ -29,7 +29,7 @@ class ServerMaintenanceManager:
 
     async def __aenter__(self):
         tasks = []
-        for instance in self.node.instances:
+        for instance in self.node.instances.values():
             server = instance.server
             if not server or server.status not in [Status.RUNNING, Status.PAUSED, Status.STOPPED]:
                 continue
@@ -49,12 +49,12 @@ class ServerMaintenanceManager:
         for server in self.to_start:
             if server not in self.in_maintenance:
                 server.maintenance = False
-            elif self.shutdown:
+            if self.shutdown:
                 tasks.append(server.startup())
 
         if tasks:
             ret = await asyncio.gather(*tasks, return_exceptions=True)
             for idx in range(0, len(ret)):
-                server = self.in_maintenance[idx]
+                server = self.to_start[idx]
                 if isinstance(ret[idx], Exception):
                     self.node.log.error(f'Timeout while starting {server.display_name}, please check it manually!')

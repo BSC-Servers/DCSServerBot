@@ -93,7 +93,7 @@ class MissionUploadHandler(ServerUploadHandler):
                 modify = False
             msg = await self.channel.send(_('Loading mission {} ...').format(name))
             try:
-                if not await self.server.loadMission(filename, modify_mission=modify):
+                if not await self.server.loadMission(filename, modify_mission=modify, use_orig=False):
                     await msg.edit(content=_('Mission {} NOT loaded.').format(name))
                 else:
                     await self.bot.audit(f"loaded mission {name}", server=self.server, user=self.message.author)
@@ -122,7 +122,11 @@ class MissionUploadHandler(ServerUploadHandler):
             elif rc == 'later':
                 mission_id = (await self.server.getMissionList()).index(filename)
                 await self.server.setStartIndex(mission_id + 1)
-                self.server.on_empty = {"command": "load", "mission_id": mission_id + 1, "user": self.message.author}
+                self.server.on_empty = {
+                    "method": "load",
+                    "mission_id": mission_id + 1,
+                    "user": self.message.author
+                }
                 await self.channel.send(
                     _('Mission {} will be loaded when server is empty or on the next restart.').format(filename))
                 return

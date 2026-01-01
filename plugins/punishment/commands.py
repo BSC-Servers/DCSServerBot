@@ -4,7 +4,7 @@ import psycopg
 
 from contextlib import suppress
 from core import (Plugin, PluginRequiredError, utils, Player, Server, PluginInstallationError, command, DEFAULT_TAG,
-                  Report, get_translation)
+                  Report, get_translation, SEND_ONLY_CHANNEL_PERMISSIONS)
 from discord import app_commands
 from discord.app_commands import Range
 from discord.ext import tasks
@@ -19,15 +19,18 @@ _ = get_translation(__name__.split('.')[1])
 
 
 class Punishment(Plugin[PunishmentEventListener]):
+
     def __init__(self, bot: DCSServerBot, eventlistener: Type[PunishmentEventListener] = None):
         super().__init__(bot, eventlistener)
         if not self.locals:
             raise PluginInstallationError(reason=f"No {self.plugin_name}.yaml file found!", plugin=self.plugin_name)
+
+    async def cog_load(self) -> None:
+        await super().cog_load()
         self.check_punishments.add_exception_type(psycopg.DatabaseError)
         self.check_punishments.add_exception_type(discord.DiscordException)
         self.check_punishments.add_exception_type(KeyError)
         self.check_punishments.start()
-        self.decay_config = self.locals.get(DEFAULT_TAG, {}).get('decay')
         self.decay.add_exception_type(psycopg.DatabaseError)
         self.decay.start()
 
@@ -36,18 +39,16 @@ class Punishment(Plugin[PunishmentEventListener]):
         self.check_punishments.cancel()
         await super().cog_unload()
 
-    async def rename(self, conn: psycopg.AsyncConnection, old_name: str, new_name: str):
-        await conn.execute('UPDATE pu_events SET server_name = %s WHERE server_name = %s', (new_name, old_name))
-        await conn.execute('UPDATE pu_events_sdw SET server_name = %s WHERE server_name = %s', (new_name, old_name))
-
-    async def update_ucid(self, conn: psycopg.AsyncConnection, old_ucid: str, new_ucid: str) -> None:
-        await conn.execute("UPDATE pu_events SET init_id = %s WHERE init_id = %s", (new_ucid, old_ucid))
-        await conn.execute("UPDATE pu_events SET target_id = %s WHERE target_id = %s", (new_ucid, old_ucid))
-
     async def punish(self, server: Server, ucid: str, punishment: dict, reason: str, points: float | None = None):
         player: Player = server.get_player(ucid=ucid)
         member = self.bot.get_member_by_ucid(ucid)
-        admin_channel = self.bot.get_admin_channel(server)
+        channel_id = self.get_config(server).get('channel')
+        if channel_id:
+            self.bot.check_channel(channel_id, SEND_ONLY_CHANNEL_PERMISSIONS)
+            channel = self.bot.get_channel(channel_id)
+        else:
+            channel = self.bot.get_admin_channel(server)
+
         if punishment['action'] == 'ban':
             # we must not punish for reslots here
             self.eventlistener.pending_kill.pop(ucid, None)
@@ -57,9 +58,6 @@ class Punishment(Plugin[PunishmentEventListener]):
                     member=utils.escape_string(member.display_name),
                     banned_by=utils.escape_string(self.bot.member.name),
                     reason=reason)
-                if admin_channel:
-                    await admin_channel.send(message)
-                await self.bot.audit(message)
                 with suppress(Exception):
                     guild = self.bot.guilds[0]
                     channel = await member.create_dm()
@@ -70,38 +68,33 @@ class Punishment(Plugin[PunishmentEventListener]):
             elif player:
                 message = _("Player {player} (ucid={ucid}) banned by {banned_by} for {reason}.").format(
                     player=player.display_name, ucid=player.ucid, banned_by=self.bot.member.name, reason=reason)
-                if admin_channel:
-                    await admin_channel.send(message)
-                await self.bot.audit(message)
             else:
                 message = _("Player with ucid {ucid} banned by {banned_by} for {reason}.").format(
                     ucid=ucid, banned_by=self.bot.member.name, reason=reason)
-                if admin_channel:
-                    await admin_channel.send(message)
-                await self.bot.audit(message)
+            # audit
+            if channel:
+                await channel.send("```" + message + "```")
+            await self.bot.audit(message)
 
         # everything after that point can only be executed if players are active
         if not player:
             return
 
+        message = None
         if punishment['action'] == 'kick' and player.active:
             # we must not punish for reslots here
             self.eventlistener.pending_kill.pop(ucid, None)
             await server.kick(player, reason)
-            if admin_channel:
-                await admin_channel.send(
-                    _("Player {player} (ucid={ucid}) kicked by {kicked_by} for {reason}.").format(
-                        player=player.display_name, ucid=player.ucid, kicked_by=self.bot.member.name, reason=reason))
+            message = _("Player {player} (ucid={ucid}) kicked by {kicked_by} for {reason}.").format(
+                player=player.display_name, ucid=player.ucid, kicked_by=self.bot.member.name, reason=reason)
 
         elif punishment['action'] == 'move_to_spec':
             # we must not punish for reslots here
             self.eventlistener.pending_kill.pop(ucid, None)
             await server.move_to_spectators(player)
             await player.sendUserMessage(_("You've been kicked back to spectators because of: {}.").format(reason))
-            if admin_channel:
-                await admin_channel.send(
-                    _("Player {player} (ucid={ucid}) moved to spectators by {spec_by} for {reason}.").format(
-                        player=player.display_name, ucid=player.ucid, spec_by=self.bot.member.name, reason=reason))
+            message = _("Player {player} (ucid={ucid}) moved to spectators by {spec_by} for {reason}.").format(
+                player=player.display_name, ucid=player.ucid, spec_by=self.bot.member.name, reason=reason)
 
         elif punishment['action'] == 'credits' and type(player).__name__ == 'CreditPlayer':
             player: CreditPlayer = cast(CreditPlayer, player)
@@ -112,10 +105,8 @@ class Punishment(Plugin[PunishmentEventListener]):
                 _("{name}, you have been punished for: {reason}!\n"
                   "Your current credit points are: {points}").format(
                     name=player.name, reason=reason, points=player.points))
-            if admin_channel:
-                await admin_channel.send(
-                    _("Player {player} (ucid={ucid}) punished with credits by {punished_by} for {reason}.").format(
-                        player=player.display_name, ucid=player.ucid, punished_by=self.bot.member.name, reason=reason))
+            message = _("Player {player} (ucid={ucid}) punished with credits by {punished_by} for {reason}.").format(
+                player=player.display_name, ucid=player.ucid, punished_by=self.bot.member.name, reason=reason)
 
         elif punishment['action'] == 'warn':
             await player.sendUserMessage(_("{name}, you have been punished for: {reason}!").format(name=player.name,
@@ -127,6 +118,11 @@ class Punishment(Plugin[PunishmentEventListener]):
         if points:
             await player.sendUserMessage(_("{name}, you have {points} punishment points.").format(name=player.name,
                                                                                                   points=points))
+        if message:
+            # audit
+            if channel:
+                await channel.send("```" + message + "```")
+            await self.bot.audit(message)
 
     # TODO: change to pubsub
     @tasks.loop(minutes=1.0)
@@ -172,17 +168,22 @@ class Punishment(Plugin[PunishmentEventListener]):
 
     @tasks.loop(hours=1.0)
     async def decay(self):
-        if self.decay_config:
+        decay_config = self.locals.get(DEFAULT_TAG, {}).get('decay')
+        if decay_config:
             self.log.debug('Punishment - Running decay ...')
             async with self.apool.connection() as conn:
                 async with conn.transaction():
-                    for d in self.decay_config:
+                    for d in decay_config:
                         days = d['days']
                         await conn.execute(f"""
                             UPDATE pu_events SET points = ROUND((points * %s)::numeric, 2), decay_run = %s 
                             WHERE time < (timezone('utc', now()) - interval '{days} days') AND decay_run < %s
                         """, (d['weight'], days, days))
                         await conn.execute("DELETE FROM pu_events WHERE points = 0.0")
+
+    @decay.before_loop
+    async def before_decay(self):
+        await self.bot.wait_until_ready()
 
     @command(name='punish', description=_('Adds punishment points to a user\n'))
     @utils.app_has_role('DCS Admin')
@@ -231,6 +232,12 @@ class Punishment(Plugin[PunishmentEventListener]):
     async def forgive(self, interaction: discord.Interaction,
                       user: app_commands.Transform[str | discord.Member, utils.UserTransformer]):
         ephemeral = utils.get_ephemeral(interaction)
+
+        if not user:
+            # noinspection PyUnresolvedReferences
+            await interaction.response.send_message(_("The user provided is invalid."), ephemeral=True)
+            return
+
         if await utils.yn_question(
                 interaction,
                 _("This will delete all the punishment points for this user and unban them if they were banned.\n"
@@ -245,6 +252,7 @@ class Punishment(Plugin[PunishmentEventListener]):
                                                             ephemeral=True)
                     else:
                         ucids = [user]
+
                     for ucid in ucids:
                         await conn.execute('DELETE FROM pu_events WHERE init_id = %s', (ucid, ))
                         await conn.execute('DELETE FROM pu_events_sdw WHERE init_id = %s', (ucid, ))

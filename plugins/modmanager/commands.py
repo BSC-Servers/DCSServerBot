@@ -1,7 +1,6 @@
 import aiohttp
 import discord
 import os
-import psycopg
 
 from core import Status, Plugin, utils, Server, ServiceRegistry, PluginInstallationError, Group, get_translation
 from discord import SelectOption, app_commands, ButtonStyle, TextStyle
@@ -51,8 +50,7 @@ async def installed_mods_autocomplete(interaction: discord.Interaction, current:
         return []
     service = ServiceRegistry.get(ModManagerService)
     try:
-        server: Server = await utils.ServerTransformer().transform(interaction,
-                                                                   utils.get_interaction_param(interaction, 'server'))
+        server: Server = await utils.ServerTransformer().transform(interaction, interaction.namespace.server)
         if not server:
             return []
         return [
@@ -70,8 +68,7 @@ async def available_mods_autocomplete(interaction: discord.Interaction, current:
         return []
     service = ServiceRegistry.get(ModManagerService)
     try:
-        server: Server = await utils.ServerTransformer().transform(interaction,
-                                                                   utils.get_interaction_param(interaction, 'server'))
+        server: Server = await utils.ServerTransformer().transform(interaction, interaction.namespace.server)
         if not server:
             return []
         return [
@@ -92,12 +89,11 @@ async def available_versions_autocomplete(interaction: discord.Interaction,
         return []
     service = ServiceRegistry.get(ModManagerService)
     try:
-        server: Server = await utils.ServerTransformer().transform(interaction,
-                                                                   utils.get_interaction_param(interaction, 'server'))
+        server: Server = await utils.ServerTransformer().transform(interaction, interaction.namespace.server)
         if not server:
             return []
         try:
-            folder, mod = utils.get_interaction_param(interaction, 'mod').split('/')
+            folder, mod = interaction.namespace.mod.split('/')
         except (ValueError, AttributeError):
             return []
         return [
@@ -115,7 +111,7 @@ async def repo_version_autocomplete(interaction: discord.Interaction, current: s
         return []
     service = ServiceRegistry.get(ModManagerService)
     try:
-        repo = utils.get_interaction_param(interaction, 'url')
+        repo = interaction.namespace.url
 
         if not repo or not utils.is_github_repo(repo):
             return []
@@ -141,16 +137,6 @@ class ModManager(Plugin):
         self.service = ServiceRegistry.get(ModManagerService)
         if not self.service:
             raise PluginInstallationError(plugin=self.plugin_name, reason='ModManager service not loaded.')
-
-    async def prune(self, conn: psycopg.AsyncConnection, *, days: int = -1, ucids: list[str] = None,
-                    server: str | None = None) -> None:
-        self.log.debug('Pruning ModManager ...')
-        if server:
-            await conn.execute("DELETE FROM mm_packages WHERE server_name = %s", (server, ))
-        self.log.debug('ModManager pruned.')
-
-    async def rename(self, conn: psycopg.AsyncConnection, old_name: str, new_name: str):
-        await conn.execute('UPDATE mm_packages SET server_name = %s WHERE server_name = %s', (new_name, old_name))
 
     # New command group "/mods"
     mods = Group(name="mods", description=_("Commands to manage custom mods in your DCS server"))
@@ -508,7 +494,7 @@ class ModManager(Plugin):
                 return
             await msg.edit(content=_("{file} downloaded. Use {command} to install it.").format(
                 file=f"{package_name}_v{version}",
-                command=(await utils.get_command(self.bot, group='mods', name='install')).mention
+                command=(await utils.get_command(self.bot, group=self.mods.name, name=self._install.name)).mention
             ))
         else:
             filename = url.split('/')[-1]
@@ -521,7 +507,8 @@ class ModManager(Plugin):
                     return
                 await self.service.download_from_repo(url, folder, version=version, force=True)
             await msg.edit(content=_("{file} downloaded. Use {command} to install it.").format(
-                file=filename, command=(await utils.get_command(self.bot, group='mods', name='install')).mention))
+                file=filename, command=(await utils.get_command(self.bot, group=self.mods.name,
+                                                                name=self._install.name)).mention))
 
 
 async def setup(bot: DCSServerBot):

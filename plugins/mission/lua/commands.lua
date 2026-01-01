@@ -16,11 +16,30 @@ dcsbot.userInfo = dcsbot.userInfo or {}
 dcsbot.red_slots = dcsbot.red_slots or {}
 dcsbot.blue_slots = dcsbot.blue_slots or {}
 dcsbot.extensions = dcsbot.extension or {}
+dcsbot.whitelist = dcsbot.whitelist or {}
 
 function dcsbot.loadParams(json)
     log.write('DCSServerBot', log.DEBUG, 'Mission: loadParams(' .. json.plugin ..')')
     dcsbot.params = dcsbot.params or {}
     dcsbot.params[json.plugin] = json.params
+end
+
+local function add_name(name)
+    if type(name) == "string" and name ~= "" then
+        dcsbot.whitelist[name] = true
+    end
+end
+
+function dcsbot.uploadWhitelist(json)
+    log.write('DCSServerBot', log.DEBUG, 'Mission: uploadWhitelist()')
+    if json.name then
+        add_name(json.name)
+    end
+    if json.name_list and type(json.name_list) == "table" then
+        for _, name in ipairs(json.name_list) do
+            add_name(name)
+        end
+    end
 end
 
 function dcsbot.registerDCSServer(json)
@@ -34,14 +53,15 @@ function dcsbot.registerDCSServer(json)
     -- airbases
     msg.airbases = {}
     -- mission
+    local mission = Sim.getCurrentMission()
     if Sim.getCurrentMission() then
         msg.filename = Sim.getMissionFilename()
         msg.current_mission = Sim.getMissionName()
-        msg.current_map = Sim.getCurrentMission().mission.theatre
+        msg.current_map = mission.mission.theatre
         msg.mission_time = Sim.getModelTime()
         msg.real_time = Sim.getRealTime()
-        msg.start_time = Sim.getCurrentMission().mission.start_time
-        msg.date = Sim.getCurrentMission().mission.date
+        msg.start_time = mission.mission.start_time
+        msg.date = mission.mission.date
         msg.pause = Sim.getPause()
         -- weather
         msg.weather = {}
@@ -50,7 +70,7 @@ function dcsbot.registerDCSServer(json)
         local availableSlots = Sim.getAvailableSlots("red")
         dcsbot.red_slots = {}
         if availableSlots ~= nil then
-            for k,v in pairs(availableSlots) do
+            for _k,v in pairs(availableSlots) do
                 dcsbot.red_slots[v.unitId] = v
                 num_slots_red = num_slots_red + 1
             end
@@ -60,7 +80,7 @@ function dcsbot.registerDCSServer(json)
         availableSlots = Sim.getAvailableSlots("blue")
         dcsbot.blue_slots = {}
         if availableSlots ~= nil then
-            for k,v in pairs(availableSlots) do
+            for _k,v in pairs(availableSlots) do
                 dcsbot.blue_slots[v.unitId] = v
                 num_slots_blue = num_slots_blue + 1
             end
@@ -70,7 +90,7 @@ function dcsbot.registerDCSServer(json)
         msg.num_slots_red = num_slots_red
         -- players
         msg.players = {}
-        plist = net.get_player_list()
+        local plist = net.get_player_list()
         for i = 1, #plist do
             msg.players[i] = net.get_player_info(plist[i])
             msg.players[i].ipaddr = utils.getIP(msg.players[i].ipaddr)
@@ -144,6 +164,7 @@ function dcsbot.getAirbases(json)
     local airdromes = Terrain.GetTerrainConfig("Airdromes")
     if (airdromes == nil) then
     	utils.sendBotTable(msg, json.channel)
+    	return
     end
     for airdromeID, airdrome in pairs(airdromes) do
         if (airdrome.reference_point) and (airdrome.abandoned ~= true)  then
@@ -152,7 +173,7 @@ function dcsbot.getAirbases(json)
             if airdrome.display_name then
                 airbase.name = airdrome.display_name
             else
-                airbase.name = airdrome.names['en']
+                airbase.name = airdrome.names.en
             end
             airbase.id = airdrome.id
             airbase.lat, airbase.lng = Terrain.convertMetersToLatLon(airdrome.reference_point.x, airdrome.reference_point.y)
@@ -166,10 +187,10 @@ function dcsbot.getAirbases(json)
                 frequencyList	= airdrome.frequency
             else
                 if airdrome.radio then
-                    for k, radioId in pairs(airdrome.radio) do
+                    for _k, radioId in pairs(airdrome.radio) do
                         local frequencies = Sim.getATCradiosData(radioId)
                         if frequencies then
-                            for kk,vv in pairs(frequencies) do
+                            for _kk,vv in pairs(frequencies) do
                                 table.insert(frequencyList, vv)
                             end
                         end
@@ -179,19 +200,172 @@ function dcsbot.getAirbases(json)
             airbase.frequencyList = frequencyList
             airbase.runwayList = {}
             if (airdrome.runwayName ~= nil) then
-                for r, runwayName in pairs(airdrome.runwayName) do
+                for _r, runwayName in pairs(airdrome.runwayName) do
                     table.insert(airbase.runwayList, runwayName)
                 end
             end
-            heading = UC.toDegrees(Terrain.getRunwayHeading(airdrome.roadnet))
+            local heading = UC.toDegrees(Terrain.getRunwayHeading(airdrome.roadnet))
             if (heading < 0) then
                 heading = 360 + heading
             end
             airbase.rwy_heading = heading
+            airbase.dynamic = DCS.getDynamicSpawnSettings(airdromeID, true)
             table.insert(msg.airbases, airbase)
         end
     end
+    local farpsAndCarriers = DCS.getFarpsAndCarriersMissionData()
+    for carrierID, carrier in pairs(farpsAndCarriers.carriers) do
+        local airbase = {}
+        airbase.name = carrier.name
+        airbase.type = carrier.type
+        airbase.coalition = carrier.coalition
+        airbase.lat, airbase.lng = Terrain.convertMetersToLatLon(carrier.x, carrier.y)
+        airbase.alt = Terrain.GetHeight(carrier.x, carrier.y)
+        airbase.position = {}
+        airbase.position.x = carrier.x
+        airbase.position.y = airbase.alt
+        airbase.position.z = carrier.y
+        airbase.dynamic = DCS.getDynamicSpawnSettings(carrierID, true) or {
+            dynamicSpawnAvailable = false,
+            allowHotSpawn = false
+        }
+        table.insert(msg.airbases, airbase)
+    end
+    for farpID, farp in pairs(farpsAndCarriers.farps) do
+        local airbase = {}
+        airbase.name = farp.name
+        airbase.type = farp.type
+        airbase.coalition = farp.coalition
+        airbase.lat, airbase.lng = Terrain.convertMetersToLatLon(farp.x, farp.y)
+        airbase.alt = Terrain.GetHeight(farp.x, farp.y)
+        airbase.position = {}
+        airbase.position.x = farp.x
+        airbase.position.y = airbase.alt
+        airbase.position.z = farp.y
+        airbase.dynamic = DCS.getDynamicSpawnSettings(farpID, true) or {
+            dynamicSpawnAvailable = false,
+            allowHotSpawn = false
+        }
+        table.insert(msg.airbases, airbase)
+    end
 	utils.sendBotTable(msg, json.channel)
+end
+
+function dcsbot.getWarehouseResources(json)
+    log.write('DCSServerBot', log.DEBUG, 'Mission: getWarehouseResources()')
+    local all_resources = base.get_all_available_resource_for_warehouse()
+    local weapons = {}
+    for _i, o in pairs(all_resources.weaponsList) do
+        local weapon = {
+            wstype = o.wsTypeStr,
+            name = base.get_weapon_display_name_by_wstype(o.wsType),
+        }
+        table.insert(weapons, weapon)
+    end
+    local aircraft_list = {}
+    for i, o in pairs(all_resources.aircraft_combined) do
+        local obj = base.Objects[i]
+        local aircraft = {
+            wstype = base.wsTypeToString(o.wsType),
+            type = obj.type,
+            name = obj.DisplayName
+        }
+        table.insert(aircraft_list, aircraft)
+    end
+    local msg = {
+        command = "getWarehouseResources",
+        weapon = weapons,
+        aircraft = aircraft_list,
+        liquids = {
+            [1] = {
+                name = "Jet Fuel",
+                wstype = 0
+            },
+            [2] = {
+                name = "Aviation Gasoline",
+                wstype = 1
+            },
+            [3] = {
+                name = "MW-50",
+                wstype = 2
+            },
+            [4] = {
+                name = "Diesel",
+                wstype = 3
+            }
+        }
+    }
+	utils.sendBotTable(msg, json.channel)
+end
+
+function dcsbot.getAirbase(json)
+    log.write('DCSServerBot', log.DEBUG, 'Mission: getAirbase()')
+	net.dostring_in('mission', 'a_do_script(' .. utils.basicSerialize('dcsbot.getAirbase("' .. json.name .. '", "' .. json.channel ..'")') .. ')')
+end
+
+function dcsbot.captureAirbase(json)
+    log.write('DCSServerBot', log.DEBUG, 'Mission: captureAirbase()')
+	net.dostring_in('mission', 'a_do_script(' .. utils.basicSerialize('dcsbot.captureAirbase("' .. json.name .. '", ' .. json.coalition .. ', "' .. json.channel ..'")') .. ')')
+end
+
+local function repr(obj)
+  if type(obj) ~= "table" then
+    return tostring(obj)
+  end
+
+  local parts = {"{"}
+  local first = true
+
+  for _i, v in ipairs(obj) do
+    if not first then parts[#parts+1] = ", " end
+    parts[#parts+1] = repr(v)
+    first = false
+  end
+
+  parts[#parts+1] = "}"
+  return table.concat(parts)
+end
+
+function dcsbot.getWarehouseItem(json)
+    log.write('DCSServerBot', log.DEBUG, 'Mission: getWarehouseItem()')
+    local item
+    if type(json.item) == "table" then
+        item = repr(json.item)
+    else
+        item = '"' .. json.item .. '"'
+    end
+	net.dostring_in('mission', 'a_do_script(' .. utils.basicSerialize('dcsbot.getWarehouseItem("' .. json.name .. '", ' .. item .. ', "' .. json.channel ..'")') .. ')')
+end
+
+function dcsbot.setWarehouseItem(json)
+    log.write('DCSServerBot', log.DEBUG, 'Mission: setWarehouseItem()')
+    local item
+    if type(json.item) == "table" then
+        item = repr(json.item)
+    else
+        item = '"' .. json.item .. '"'
+    end
+	net.dostring_in('mission', 'a_do_script(' .. utils.basicSerialize('dcsbot.setWarehouseItem("' .. json.name .. '", ' .. item .. ', ' .. json.value .. ', "' .. json.channel ..'")') .. ')')
+end
+
+function dcsbot.getWarehouseLiquid(json)
+    log.write('DCSServerBot', log.DEBUG, 'Mission: getWarehouseLiquid()')
+	net.dostring_in('mission', 'a_do_script(' .. utils.basicSerialize('dcsbot.getWarehouseLiquid("' .. json.name .. '", ' .. json.item .. ', "' .. json.channel ..'")') .. ')')
+end
+
+function dcsbot.setWarehouseLiquid(json)
+    log.write('DCSServerBot', log.DEBUG, 'Mission: setWarehouseLiquid()')
+	net.dostring_in('mission', 'a_do_script(' .. utils.basicSerialize('dcsbot.setWarehouseLiquid("' .. json.name .. '", ' .. json.item .. ', ' .. json.value .. ', "' .. json.channel ..'")') .. ')')
+end
+
+function dcsbot.setAutoCapture(json)
+    log.write('DCSServerBot', log.DEBUG, 'Mission: setAutoCapture()')
+	net.dostring_in('mission', 'a_do_script(' .. utils.basicSerialize('dcsbot.setAutoCapture("' .. json.name .. '", ' .. tostring(json.value) .. ')') .. ')')
+end
+
+function dcsbot.setRadioSilentMode(json)
+    log.write('DCSServerBot', log.DEBUG, 'Mission: setRadioSilentMode()')
+	net.dostring_in('mission', 'a_do_script(' .. utils.basicSerialize('dcsbot.setRadioSilentMode("' .. json.name .. '", ' .. tostring(json.value) .. ')') .. ')')
 end
 
 function dcsbot.listMissions(json)
@@ -207,7 +381,8 @@ function dcsbot.startMission(json)
         json.result = net.missionlist_run(json.id)
         if json.result == true then
             utils.saveSettings({
-                listStartIndex=json.id
+                listStartIndex = json.id,
+                current = json.id
             })
         end
     else
@@ -225,7 +400,7 @@ function dcsbot.startNextMission(json)
 	if json.result == true then
         local mission_list = net.missionlist_get()
 		utils.saveSettings({
-			listStartIndex=mission_list["listStartIndex"]
+			listStartIndex=mission_list.listStartIndex
 		})
 	end
 	utils.sendBotTable(json, json.channel)
@@ -237,12 +412,12 @@ function dcsbot.restartMission(json)
 	utils.sendBotTable(json, json.channel)
 end
 
-function dcsbot.pauseMission(json)
+function dcsbot.pauseMission(_json)
     log.write('DCSServerBot', log.DEBUG, 'Mission: pauseMission()')
 	Sim.setPause(true)
 end
 
-function dcsbot.unpauseMission(json)
+function dcsbot.unpauseMission(_json)
     log.write('DCSServerBot', log.DEBUG, 'Mission: unpauseMission()')
 	Sim.setPause(false)
 end
@@ -250,7 +425,8 @@ end
 function dcsbot.setStartIndex(json)
     log.write('DCSServerBot', log.DEBUG, 'Mission: setStartIndex()')
 	utils.saveSettings({
-		listStartIndex = json.id
+		listStartIndex = json.id,
+		current = json.id
     })
 end
 
@@ -264,18 +440,18 @@ function dcsbot.addMission(json)
 	end
 	net.missionlist_append(path)
 	if json.index ~= nil and tonumber(json.index) > 0 then
-	    net.missionlist_move(#current_missions["missionList"], tonumber(json.index))
+	    net.missionlist_move(#current_missions.missionList, tonumber(json.index))
 	end
 	local current_missions = net.missionlist_get()
-	local listStartIndex = current_missions["listStartIndex"]
+	local listStartIndex = current_missions.listStartIndex
     if json.autostart == true then
-        listStartIndex = #current_missions['missionList']
+        listStartIndex = #current_missions.missionList
     -- workaround DCS bug
-    elseif #current_missions['missionList'] < listStartIndex then
+    elseif #current_missions.missionList < listStartIndex then
         listStartIndex = 1
     end
 	utils.saveSettings({
-        missionList = current_missions["missionList"],
+        missionList = current_missions.missionList,
 		listStartIndex = listStartIndex
     })
 	dcsbot.listMissions(json)
@@ -286,12 +462,12 @@ function dcsbot.deleteMission(json)
 	net.missionlist_delete(json.id)
 	local current_missions = net.missionlist_get()
     -- workaround DCS bug
-	local listStartIndex = current_missions["listStartIndex"]
-    if #current_missions['missionList'] < listStartIndex then
+	local listStartIndex = current_missions.listStartIndex
+    if #current_missions.missionList < listStartIndex then
         listStartIndex = 1
     end
 	utils.saveSettings({
-		missionList = current_missions["missionList"],
+		missionList = current_missions.missionList,
 		listStartIndex = listStartIndex
 	})
 	dcsbot.listMissions(json)
@@ -300,17 +476,13 @@ end
 function dcsbot.replaceMission(json)
     log.write('DCSServerBot', log.DEBUG, 'Mission: replaceMission()')
 	local current_missions = net.missionlist_get()
+	local listStartIndex = current_missions.listStartIndex
     net.missionlist_delete(tonumber(json.index))
     net.missionlist_append(json.path)
-    net.missionlist_move(#current_missions["missionList"], tonumber(json.index))
+    net.missionlist_move(#current_missions.missionList, tonumber(json.index))
 	current_missions = net.missionlist_get()
-    -- workaround DCS bug
-	local listStartIndex = current_missions["listStartIndex"]
-    if #current_missions['missionList'] < listStartIndex then
-        listStartIndex = 1
-    end
 	utils.saveSettings({
-		missionList = current_missions["missionList"],
+		missionList = current_missions.missionList,
 		listStartIndex = listStartIndex
     })
 	dcsbot.listMissions(json)
@@ -367,7 +539,7 @@ function dcsbot.getWeatherInfo(json)
 	msg.weather = weather
 	local clouds = msg.weather.clouds
 	if clouds.preset ~= nil then
-		local func, err = loadfile(lfs.currentdir() .. '/Config/Effects/clouds.lua')
+		local func, _err = loadfile(lfs.currentdir() .. '/Config/Effects/clouds.lua')
 
 		local env = {
 			type = _G.type,
@@ -487,8 +659,29 @@ function dcsbot.force_player_slot(json)
     end
 end
 
+local function relative_date(ts)
+    local now   = os.time()     -- seconds since 1970‑01‑01 UTC
+    local diff  = ts - now      -- seconds left
+
+    local sign  = diff < 0 and "-" or ""
+    diff = math.abs(diff)
+
+    local days   = math.floor(diff / 86400)
+    diff = diff % 86400
+    local hours  = math.floor(diff / 3600)
+    diff = diff % 3600
+    local minutes = math.floor(diff / 60)
+
+    return string.format("%s%dd %02dh %02dm",
+        sign, days, hours, minutes)
+end
+
 local function single_ban(json)
     local banned_until = json.banned_until or 'never'
+    if tonumber(banned_until) ~= nil then
+        local ts = tonumber(json.banned_until)
+        banned_until = 'in ' .. relative_date(ts) .. ' at ' .. os.date("!%Y-%m-%d %H:%M (UTC)", ts)
+    end
     local reason = json.reason .. '.\nExpires ' .. banned_until
     dcsbot.banList[json.ucid] = reason
     local plist = net.get_player_list()
@@ -531,20 +724,21 @@ end
 
 function dcsbot.lock_server(json)
     log.write('DCSServerBot', log.DEBUG, 'Mission: lock_server()')
-	dcsbot.server_locked = true
-	if json.message then
-	    messages = dcsbot.params['mission']['messages']
-	    messages['message_server_locked_old'] = messages['message_server_locked']
-        messages['message_server_locked'] = json.message
+    dcsbot.server_locked = true
+
+    if json.message then
+        local m = dcsbot.params.mission.messages
+        m.message_server_locked_old, m.message_server_locked = m.message_server_locked, json.message
     end
 end
 
-function dcsbot.unlock_server(json)
+function dcsbot.unlock_server(_json)
     log.write('DCSServerBot', log.DEBUG, 'Mission: unlock_server()')
 	dcsbot.server_locked = false
+
     -- reset the message to default
-    messages = dcsbot.params['mission']['messages']
-    messages['message_server_locked'] = messages['message_server_locked_old']
+    local m = dcsbot.params.mission.messages
+    m.message_server_locked = m.message_server_locked_old
 end
 
 function dcsbot.makeScreenshot(json)
@@ -579,7 +773,7 @@ end
 function dcsbot.setFogAnimation(json)
     log.write('DCSServerBot', log.DEBUG, 'Mission: setFogAnimation()')
     local animation = '{'
-    for i, value in pairs(json.values) do
+    for _i, value in pairs(json.values) do
         animation = animation .. '{' .. value[1] .. ',' .. value[2] .. ',' .. value[3] .. '},'
     end
     animation = animation .. '}'

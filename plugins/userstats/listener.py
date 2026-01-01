@@ -35,7 +35,7 @@ class UserStatisticsEventListener(EventListener["UserStatistics"]):
     }
 
     SQL_MISSION_HANDLING = {
-        'start_mission': 'INSERT INTO missions (server_name, mission_name, mission_theatre) VALUES (%s, %s, %s)',
+        'start_mission': 'INSERT INTO missions (server_name, mission_name, mission_theatre) VALUES (%s, %s, %s) RETURNING id',
         'current_mission_id': 'SELECT id, mission_name FROM missions WHERE server_name = %s AND mission_end IS NULL',
         'close_statistics': "UPDATE statistics SET hop_off = GREATEST((hop_on + INTERVAL '1 second'), (now() AT TIME ZONE 'utc')) WHERE mission_id = %s AND hop_off IS NULL",
         'close_mission': "UPDATE missions SET mission_end = (now() AT TIME ZONE 'utc') WHERE id = %s",
@@ -132,54 +132,55 @@ class UserStatisticsEventListener(EventListener["UserStatistics"]):
                         # create a new mission
                         cursor.execute(self.SQL_MISSION_HANDLING['start_mission'],
                                        (server.name, data['current_mission'], data['current_map']))
-                        cursor.execute(self.SQL_MISSION_HANDLING['current_mission_id'], (server.name,))
                         if cursor.rowcount == 1:
                             mission_id = (cursor.fetchone())[0]
                         else:
                             self.log.error('FATAL: Initialization of mission table failed. Statistics will not be '
                                            'gathered for this session.')
+
+                    if mission_id == -1:
+                        return
+
                     server.mission_id = mission_id
-                    if mission_id != -1:
-                        # initialize active players
-                        players = server.get_active_players()
-                        ucids = []
-                        for player in players:
-                            ucids.append(player.ucid)
-                            # make sure we get slot changes that might have occurred in the meantime
-                            cursor.execute(self.SQL_MISSION_HANDLING['check_player'], (mission_id, player.ucid))
-                            player_started = False
-                            if cursor.rowcount == 1:
-                                # the player is there already ...
-                                if (cursor.fetchone())[0] != player.unit_type:
-                                    # ... but with a different aircraft, so close the old session
-                                    cursor.execute(self.SQL_MISSION_HANDLING['stop_player'],
-                                                   (mission_id, player.ucid))
-                                else:
-                                    # session will be kept
-                                    player_started = True
-                            if not player_started and player.side != Side.SPECTATOR:
-                                cursor.execute(self.SQL_MISSION_HANDLING['start_player'],
-                                               (
-                                                   mission_id,
-                                                   player.ucid,
-                                                   self.get_unit_type(player),
-                                                   self.get_unit_callsign(player),
-                                                   player.side.value)
-                                               )
-                        # close dead entries in the database (if existent)
-                        cursor.execute(self.SQL_MISSION_HANDLING['all_players'], (mission_id, ))
-                        for row in cursor.fetchall():
-                            if row[0] not in ucids:
-                                cursor.execute(self.SQL_MISSION_HANDLING['stop_player'], (mission_id, row[0]))
+                    # initialize active players
+                    players = server.get_active_players()
+                    ucids = []
+                    for player in players:
+                        ucids.append(player.ucid)
+                        # make sure we get slot changes that might have occurred in the meantime
+                        cursor.execute(self.SQL_MISSION_HANDLING['check_player'], (mission_id, player.ucid))
+                        player_started = False
+                        if cursor.rowcount == 1:
+                            # the player is there already ...
+                            if (cursor.fetchone())[0] != player.unit_type:
+                                # ... but with a different aircraft, so close the old session
+                                cursor.execute(self.SQL_MISSION_HANDLING['stop_player'],
+                                               (mission_id, player.ucid))
+                            else:
+                                # session will be kept
+                                player_started = True
+                        if not player_started and player.side != Side.NEUTRAL:
+                            cursor.execute(self.SQL_MISSION_HANDLING['start_player'],
+                                           (
+                                               mission_id,
+                                               player.ucid,
+                                               self.get_unit_type(player),
+                                               self.get_unit_callsign(player),
+                                               player.side.value)
+                                           )
+                    # close dead entries in the database (if existent)
+                    cursor.execute(self.SQL_MISSION_HANDLING['all_players'], (mission_id, ))
+                    for row in cursor.fetchall():
+                        if row[0] not in ucids:
+                            cursor.execute(self.SQL_MISSION_HANDLING['stop_player'], (mission_id, row[0]))
 
     @event(name="onMissionLoadEnd")
     async def onMissionLoadEnd(self, server: Server, data: dict) -> None:
         with self.pool.connection() as conn:
             with conn.transaction():
                 self.close_all_statistics(conn, server)
-                conn.execute(self.SQL_MISSION_HANDLING['start_mission'],
-                             (server.name, data['current_mission'], data['current_map']))
-                cursor = conn.execute(self.SQL_MISSION_HANDLING['current_mission_id'], (server.name,))
+                cursor = conn.execute(self.SQL_MISSION_HANDLING['start_mission'],
+                                      (server.name, data['current_mission'], data['current_map']))
                 if cursor.rowcount == 1:
                     server.mission_id = (cursor.fetchone())[0]
                 else:
@@ -204,7 +205,7 @@ class UserStatisticsEventListener(EventListener["UserStatistics"]):
         with self.pool.connection() as conn:
             with conn.transaction():
                 conn.execute(self.SQL_MISSION_HANDLING['stop_player'], (server.mission_id, data['ucid']))
-                if Side(data['side']) != Side.SPECTATOR:
+                if Side(data['side']) != Side.NEUTRAL:
                     conn.execute(self.SQL_MISSION_HANDLING['start_player'],
                                  (
                                      server.mission_id,
@@ -316,8 +317,11 @@ class UserStatisticsEventListener(EventListener["UserStatistics"]):
 
     @event(name="onGameEvent")
     async def onGameEvent(self, server: Server, data: dict) -> None:
-        event_name = data['eventName']
+        # we cannot write statistics for this session
+        if server.mission_id == -1:
+            return
 
+        event_name = data['eventName']
         with self.pool.connection() as conn:
             with conn.transaction():
                 if event_name == 'disconnect':

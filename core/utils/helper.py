@@ -20,6 +20,7 @@ import string
 import tempfile
 import threading
 import time
+import traceback
 import unicodedata
 
 # for eval
@@ -58,6 +59,9 @@ __all__ = [
     "format_period",
     "slugify",
     "alternate_parse_settings",
+    "exception_to_dict",
+    "rebuild_exception",
+    "ReprException",
     "get_all_players",
     "is_ucid",
     "get_presets",
@@ -75,6 +79,7 @@ __all__ = [
     "deep_merge",
     "hash_password",
     "run_parallel_nofail",
+    "safe_set_result",
     "evaluate",
     "for_each",
     "YAMLError",
@@ -122,6 +127,8 @@ def is_in_timeframe(time: datetime, timeframe: str, tz: tzinfo = None) -> bool:
         start_time = end_time = parse_time(timeframe, tz).replace(year=time.year, month=time.month, day=time.day,
                                                                   second=0, microsecond=0)
     check_time = time.replace(second=0, microsecond=0)
+    if tz:
+        check_time = check_time.astimezone(tz=tz)
     return start_time <= check_time <= end_time
 
 
@@ -329,6 +336,55 @@ def alternate_parse_settings(path: str):
     return settings
 
 
+def exception_to_dict(e: BaseException) -> dict[str, Any]:
+    """Return a plain‑dict representation of any exception."""
+    exc_dict = {
+        'class': f'{e.__class__.__module__}.{e.__class__.__name__}',
+        'message': str(e),
+        'traceback': traceback.format_exception_only(type(e), e), 'args': [repr(a) for a in e.args]
+    }
+
+    # Pull out useful OSError / socket attributes
+    # (only those that are JSON‑friendly)
+    for key in ('errno', 'strerror', 'filename', 'filename2'):
+        if hasattr(e, key):
+            exc_dict[key] = getattr(e, key)
+
+    # If the exception has a kwargs dict (rare), sanitize it
+    kwargs = getattr(e, 'kwargs', None)
+    if isinstance(kwargs, dict):
+        exc_dict['kwargs'] = {k: repr(v) for k, v in kwargs.items()}
+
+    return exc_dict
+
+
+class ReprException(Exception):
+    """Wrapper that keeps the original payload if we can’t rebuild it."""
+    def __init__(self, payload: dict[str, Any]):
+        self.payload = payload
+        super().__init__(f'Unable to reconstruct exception from {payload!r}')
+
+
+def rebuild_exception(payload: dict[str, Any]) -> BaseException:
+    """
+    Recreate a BaseException from the serialized payload.
+    If the payload cannot be used to instantiate the original type,
+    we return a lightweight wrapper that stores the payload.
+    """
+    cls = str_to_class(payload['class'])
+    if not cls:
+        return ReprException(payload)
+
+    args = tuple(payload.get('args', ()))          # ensures a tuple
+    kwargs = dict(payload.get('kwargs', {}))      # ensures a dict
+
+    try:
+        return cls(*args, **kwargs)
+    except Exception:
+        # Constructor raised an unexpected error – fall back.
+        return ReprException(payload)
+
+
 def get_all_players(self, linked: bool | None = None, watchlist: bool | None = None,
                     vip: bool | None = None) -> list[tuple[str, str]]:
     """
@@ -387,7 +443,7 @@ def get_presets(node: Node) -> Iterable[str]:
     return presets
 
 
-def get_preset(node: Node, name: str, filename: str | None = None) -> dict | None:
+def get_preset(node: Node, name: str, filename: str | list[str] | None = None) -> dict | None:
     """
     :param node: The node where the configuration is stored.
     :param name: The name of the preset to retrieve.
@@ -405,13 +461,17 @@ def get_preset(node: Node, name: str, filename: str | None = None) -> dict | Non
             return [_read_presets_from_file(filename, x) for x in preset]
         return preset
 
-    if filename:
-        return _read_presets_from_file(Path(filename), name)
+    if isinstance(filename, str):
+        preset_files = [filename]
+    elif isinstance(filename, list):
+        preset_files = filename
     else:
-        for file in Path(node.config_dir).glob('presets*.yaml'):
-            preset = _read_presets_from_file(file, name)
-            if preset:
-                return preset
+        preset_files = Path(node.config_dir).glob('presets*.yaml')
+
+    for file in preset_files:
+        preset = _read_presets_from_file(Path(file), name)
+        if preset:
+            return preset
     return None
 
 
@@ -493,14 +553,14 @@ def async_cache(func: Callable):
         # Convert unhashable types to hashable forms
         hashable_args = []
         for k, v in bound_args.arguments.items():
-            if k not in ["interaction"]:  # Removed "self" from exclusion list
+            if k not in ["interaction"]:  # Removed "self" from the exclusion list
                 # For the self-parameter, use its id as part of the key
                 if k == "self":
                     hashable_args.append(id(v))
                 # if we have a .name element, use this as key instead
                 elif hasattr(v, "name") and not isinstance(v, (str, bytes)):
                     hashable_args.append(("name", getattr(v, "name", None)))
-                # Convert lists to tuples, and handle nested lists
+                # Convert lists to tuples and handle nested lists
                 elif isinstance(v, list):
                     hashable_args.append(tuple(tuple(x) if isinstance(x, list) else x for x in v))
                 else:
@@ -602,7 +662,7 @@ def cache_with_expiration(expiration: int):
             # Fast path
             lock = locks.get(cache_key)
             if lock is None:
-                # Create lazily; small race is fine (we only need mutual exclusion, not singletons)
+                # Create lazily; a small race is fine (we only need mutual exclusion, not singletons)
                 lock = asyncio.Lock()
                 locks[cache_key] = lock
             return lock
@@ -939,20 +999,44 @@ def tree_delete(d: dict, key: str, debug: bool | None = False):
         curr_element.pop(int(keys[-1]))
 
 
-def deep_merge(dict1, dict2):
-    result = dict(dict1)  # Create a shallow copy of dict1
-    for key, value in dict2.items():
-        if key in result and isinstance(result[key], Mapping) and isinstance(value, Mapping):
-            # Recursively merge dictionaries
+def deep_merge(d1: Mapping[str, Any], d2: Mapping[str, Any]) -> Mapping[str, Any]:
+    """
+       Merge two dictionaries recursively.  Non‑mapping values are overwritten.
+
+       Parameters
+       ----------
+       d1, d2 : Mapping
+           Input mappings to merge.  They are *not* modified.
+
+       Returns
+       -------
+       dict
+           A new dictionary containing the deep merge of `d1` and `d2`.
+       """
+    if not isinstance(d1, Mapping):
+        raise TypeError(f"d1 must be a Mapping, got {type(d1).__name__}")
+    if not isinstance(d2, Mapping):
+        raise TypeError(f"d2 must be a Mapping, got {type(d2).__name__}")
+
+    result: dict = dict(d1)  # shallow copy of d1
+
+    for key, value in d2.items():
+        # If both sides are mappings, merge recursively
+        if (
+                key in result
+                and isinstance(result[key], Mapping)
+                and isinstance(value, Mapping)
+        ):
             result[key] = deep_merge(result[key], value)
         else:
-            # Overwrite or add the new key-value pair
+            # Overwrite or add the new key/value pair
             result[key] = value
+
     return result
 
 
 def hash_password(password: str) -> str:
-    # Generate an 11 character alphanumeric string
+    # Generate an 11-character alphanumeric string
     key = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(11))
 
     # Create a 32-byte-digest using the "Blake2b" hash algorithm
@@ -973,6 +1057,11 @@ def hash_password(password: str) -> str:
 async def run_parallel_nofail(*tasks):
     """Run tasks in parallel, ignoring any failures."""
     await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def safe_set_result(fut: asyncio.Future, payload: dict) -> None:
+    if not fut.done():
+        fut.set_result(payload)
 
 
 def evaluate(value: str | int | float | bool | list | dict, **kwargs) -> str | int | float | bool | list | dict:
@@ -1109,7 +1198,7 @@ def for_each(data: dict, search: list[str], depth: int | None = 0, *,
 class YAMLError(Exception):
     """
 
-    The `YAMLError` class is an exception class that is raised when there is an error encountered while parsing or scanning a YAML file.
+    The `YAMLError` class is an exception class raised when there is an error encountered while parsing or scanning a YAML file.
 
     **Methods:**
 

@@ -3,6 +3,7 @@ import asyncio
 import os
 import uuid
 
+from abc import ABC, abstractmethod
 from core import utils
 from core.const import DEFAULT_TAG
 from core.utils.performance import PerformanceLog, performance_log
@@ -14,7 +15,7 @@ from psutil import Process
 from typing import TYPE_CHECKING, Any
 
 from .dataobject import DataObject
-from .const import Status, Coalition, Channel, Side
+from .const import Status, Coalition, Channel, Side, Port
 from ..utils.helper import YAMLError, async_cache
 
 # ruamel YAML support
@@ -33,8 +34,8 @@ _ = get_translation('core')
 
 
 @dataclass
-class Server(DataObject):
-    port: int
+class Server(DataObject, ABC):
+    port: Port
     bus: ServiceBus = field(compare=False)
     _instance: Instance = field(compare=False, default=None)
     _channels: dict[Channel, int] = field(default_factory=dict, compare=False)
@@ -43,7 +44,7 @@ class Server(DataObject):
     _options: utils.SettingsDict | utils.RemoteSettingsDict | None = field(default=None, compare=False)
     _settings: utils.SettingsDict | utils.RemoteSettingsDict | None = field(default=None, compare=False)
     current_mission: Mission | None = field(default=None, compare=False)
-    mission_id: int = field(default=-1, compare=False)
+    _mission_id: int = field(default=None, compare=False)
     players: dict[int, Player] = field(default_factory=dict, compare=False)
     process: Process | None = field(default=None, compare=False)
     _maintenance: bool = field(compare=False, default=False)
@@ -57,12 +58,14 @@ class Server(DataObject):
     last_seen: datetime = field(compare=False, default=datetime.now(timezone.utc))
     restart_time: datetime = field(compare=False, default=None)
     idle_since: datetime | None = field(compare=False, default=None)
+    resources: dict = field(repr=False, default_factory=dict)
 
     def __post_init__(self):
         super().__post_init__()
         self.status_change = asyncio.Event()
         self.locals = self.read_locals()
 
+    @abstractmethod
     async def reload(self):
         raise NotImplementedError()
 
@@ -116,6 +119,26 @@ class Server(DataObject):
     def status(self, status: Status | str):
         self.set_status(status)
 
+    @property
+    def mission_id(self) -> int:
+        if not self._mission_id:
+            with self.pool.connection() as conn:
+                cursor = conn.execute("""
+                    SELECT id FROM missions 
+                    WHERE server_name = %s AND mission_end IS NULL
+                    ORDER BY mission_start DESC
+                    LIMIT 1
+                """, (self.name, ))
+                if cursor.rowcount == 1:
+                    self._mission_id = cursor.fetchone()[0]
+                else:
+                    self._mission_id = -1
+        return self._mission_id
+
+    @mission_id.setter
+    def mission_id(self, mission_id: int):
+        self._mission_id = mission_id
+
     # allow overloading of setter
     def set_status(self, status: Status | str):
         if isinstance(status, str):
@@ -123,7 +146,7 @@ class Server(DataObject):
         else:
             new_status = status
         if new_status != self._status:
-            self.log.debug(f"{self.name}: {self._status.name} => {new_status.name}")
+            #self.log.debug(f"{self.name}: {self._status.name} => {new_status.name}")
             self.last_seen = datetime.now(timezone.utc)
             self._status = new_status
             self.status_change.set()
@@ -179,6 +202,7 @@ class Server(DataObject):
     def coalitions(self) -> bool:
         return self.locals.get('coalitions') is not None
 
+    @abstractmethod
     async def get_missions_dir(self) -> str:
         raise NotImplementedError()
 
@@ -245,25 +269,36 @@ class Server(DataObject):
         })
 
     @property
+    @abstractmethod
     def settings(self) -> dict:
         raise NotImplementedError()
 
     @property
+    @abstractmethod
     def options(self) -> dict:
         raise NotImplementedError()
 
+    @abstractmethod
     async def get_current_mission_file(self) -> str | None:
         raise NotImplementedError()
 
+    @abstractmethod
     async def get_current_mission_theatre(self) -> str | None:
         raise NotImplementedError()
 
+    @abstractmethod
     async def send_to_dcs(self, message: dict):
         raise NotImplementedError()
 
+    @abstractmethod
     async def rename(self, new_name: str, update_settings: bool = False) -> None:
         raise NotImplementedError()
 
+    @abstractmethod
+    async def unlink(self):
+        raise NotImplementedError()
+
+    @abstractmethod
     async def startup(self, modify_mission: bool | None = True, use_orig: bool | None = True) -> None:
         raise NotImplementedError()
 
@@ -277,7 +312,8 @@ class Server(DataObject):
                 await self.send_to_dcs(message)
                 return await asyncio.wait_for(future, timeout)
             finally:
-                del self.listeners[token]
+                if self.listeners.get(token) is future:
+                    self.listeners.pop(token, None)
 
     async def sendChatMessage(self, coalition: Coalition, message: str, sender: str = None):
         if coalition == Coalition.ALL:
@@ -322,6 +358,7 @@ class Server(DataObject):
             "command": "unlock_server"
         })
 
+    @abstractmethod
     async def stop(self) -> None:
         raise NotImplementedError()
 
@@ -330,53 +367,67 @@ class Server(DataObject):
         if self.status == Status.STOPPED:
             timeout = 300 if self.node.locals.get('slow_system', False) else 180
             self.status = Status.LOADING
-            rc = await self.send_to_dcs_sync({"command": "start_server"})
+            rc = await self.send_to_dcs_sync({"command": "start_server"}, timeout)
             if rc['result'] == 0:
                 await self.wait_for_status_change([Status.PAUSED, Status.RUNNING], timeout)
                 return True
         return False
 
+    @abstractmethod
     async def restart(self, modify_mission: bool | None = True, use_orig: bool | None = True) -> None:
         raise NotImplementedError()
 
+    @abstractmethod
     async def setStartIndex(self, mission_id: int) -> None:
         raise NotImplementedError()
 
+    @abstractmethod
     async def setPassword(self, password: str):
         raise NotImplementedError()
 
+    @abstractmethod
     async def setCoalitionPassword(self, coalition: Coalition, password: str):
         raise NotImplementedError()
 
+    @abstractmethod
     async def addMission(self, path: str, *, idx: int | None = -1, autostart: bool | None = False) -> list[str]:
         raise NotImplementedError()
 
+    @abstractmethod
     async def deleteMission(self, mission_id: int) -> list[str]:
         raise NotImplementedError()
 
+    @abstractmethod
     async def replaceMission(self, mission_id: int, path: str) -> list[str]:
         raise NotImplementedError()
 
+    @abstractmethod
     async def loadMission(self, mission: int | str, modify_mission: bool | None = True,
                           use_orig: bool | None = True, no_reload: bool | None = False) -> bool | None:
         raise NotImplementedError()
 
+    @abstractmethod
     async def loadNextMission(self, modify_mission: bool | None = True, use_orig: bool | None = True) -> bool:
         raise NotImplementedError()
 
+    @abstractmethod
     async def getMissionList(self) -> list[str]:
         raise NotImplementedError()
 
+    @abstractmethod
     async def getAllMissionFiles(self) -> list[str]:
         raise NotImplementedError()
 
+    @abstractmethod
     async def modifyMission(self, filename: str, preset: list | dict, use_orig: bool = True) -> str:
         raise NotImplementedError()
 
+    @abstractmethod
     async def uploadMission(self, filename: str, url: str, *, missions_dir: str = None, force: bool = False,
                             orig = False) -> UploadStatus:
         raise NotImplementedError()
 
+    @abstractmethod
     async def apply_mission_changes(self, filename: str | None = None, use_orig: bool | None = True) -> str:
         raise NotImplementedError()
 
@@ -404,6 +455,7 @@ class Server(DataObject):
                 self._channels[Channel.COALITION_RED_EVENTS] = self._channels[Channel.COALITION_RED_CHAT]
         return self._channels
 
+    @abstractmethod
     async def update_channels(self, channels: dict[str, int]) -> None:
         raise NotImplementedError()
 
@@ -415,42 +467,55 @@ class Server(DataObject):
         if self.status not in status:
             await asyncio.wait_for(wait(status), timeout)
 
+    @abstractmethod
     async def shutdown(self, force: bool = False) -> None:
         raise NotImplementedError()
 
+    @abstractmethod
     async def init_extensions(self) -> list[str]:
         raise NotImplementedError()
 
+    @abstractmethod
     async def prepare_extensions(self):
         raise NotImplementedError()
 
+    @abstractmethod
     async def persist_settings(self):
         raise NotImplementedError()
 
+    @abstractmethod
     async def render_extensions(self) -> list[dict]:
         raise NotImplementedError()
 
+    @abstractmethod
     async def is_running(self) -> bool:
         raise NotImplementedError()
 
+    @abstractmethod
     async def run_on_extension(self, extension: str, method: str, **kwargs) -> Any:
         raise NotImplementedError()
 
+    @abstractmethod
     async def config_extension(self, name: str, config: dict) -> None:
         raise NotImplementedError()
 
+    @abstractmethod
     async def install_extension(self, name: str, config: dict) -> None:
         raise NotImplementedError()
 
+    @abstractmethod
     async def uninstall_extension(self, name: str) -> None:
         raise NotImplementedError()
 
+    @abstractmethod
     async def cleanup(self) -> None:
         raise NotImplementedError()
 
+    @abstractmethod
     async def install_plugin(self, plugin: str) -> None:
         raise NotImplementedError()
 
+    @abstractmethod
     async def uninstall_plugin(self, plugin: str) -> None:
         raise NotImplementedError()
 

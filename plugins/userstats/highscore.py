@@ -12,7 +12,7 @@ from .filter import StatisticsFilter
 
 def get_sides(interaction: discord.Interaction, server: Server) -> list[Side]:
     if not interaction:
-        return [Side.SPECTATOR.value, Side.BLUE.value, Side.RED.value]
+        return [Side.NEUTRAL.value, Side.BLUE.value, Side.RED.value]
     tmp = utils.get_sides(interaction.client, interaction, server)
     sides = [0]
     if Coalition.RED in tmp:
@@ -21,7 +21,7 @@ def get_sides(interaction: discord.Interaction, server: Server) -> list[Side]:
         sides.append(Side.BLUE.value)
     # in this specific case, we want to display all data, if in public channels
     if len(sides) == 0:
-        sides = [Side.SPECTATOR.value, Side.BLUE.value, Side.RED.value]
+        sides = [Side.NEUTRAL.value, Side.BLUE.value, Side.RED.value]
     return sides
 
 
@@ -103,6 +103,10 @@ class HighscoreElement(report.GraphElement):
 
     async def render(self, interaction: discord.Interaction, server_name: str, limit: int, kill_type: str,
                      flt: StatisticsFilter, bar_labels: bool | None = True):
+
+        if flt is None:
+            raise ValueError('Wrong period provided!')
+
         sql_parts = {
             'Air Targets': 'SUM(s.kills_planes+s.kills_helicopters)',
             'Ships': 'SUM(s.kills_ships)',

@@ -13,7 +13,6 @@ from discord.utils import MISSING
 from psycopg.errors import UniqueViolation
 from psycopg.rows import dict_row
 from services.bot import DCSServerBot
-from typing import Type
 
 from .filter import StatisticsFilter, PeriodFilter, CampaignFilter, MissionFilter, PeriodTransformer, SquadronFilter, \
     TheatreFilter
@@ -52,8 +51,8 @@ def parse_params(self, ctx, member: discord.Member | str | None, *params) \
 
 class UserStatistics(Plugin[UserStatisticsEventListener]):
 
-    def __init__(self, bot: DCSServerBot, listener: Type[UserStatisticsEventListener]):
-        super().__init__(bot, listener)
+    async def cog_load(self) -> None:
+        await super().cog_load()
         if self.locals:
             self.persistent_highscore.start()
             self.refresh_views.start()
@@ -65,6 +64,11 @@ class UserStatistics(Plugin[UserStatisticsEventListener]):
                 super().change_commands({
                     "squadron": {"leave": {"enabled": False}}
                 }, {x.name: x for x in self.get_app_commands()})
+
+    async def cog_unload(self):
+        if self.locals:
+            self.persistent_highscore.cancel()
+        await super().cog_unload()
 
     async def migrate(self, new_version: str, conn: psycopg.AsyncConnection | None = None) -> None:
         if new_version == '3.2':
@@ -95,38 +99,12 @@ class UserStatistics(Plugin[UserStatisticsEventListener]):
                 self.locals = self.read_locals()
                 self.log.warning(f"New file {path} written, please check for possible errors.")
 
-    async def cog_unload(self):
-        if self.locals:
-            self.persistent_highscore.cancel()
-        await super().cog_unload()
-
-    async def prune(self, conn: psycopg.AsyncConnection, *, days: int = -1, ucids: list[str] = None,
-                    server: str | None = None) -> None:
+    async def prune(self, conn: psycopg.AsyncConnection, days: int) -> None:
         self.log.debug('Pruning Userstats ...')
-        if ucids:
-            for ucid in ucids:
-                await conn.execute("DELETE FROM statistics WHERE player_ucid = %s", (ucid, ))
-                await conn.execute("DELETE FROM squadron_members WHERE player_ucid = %s", (ucid, ))
-        elif days > -1:
-            await conn.execute("""
-                DELETE FROM statistics WHERE hop_off < (DATE(now() AT TIME ZONE 'utc') - %s::interval)
-            """, (f'{days} days',))
-        if server:
-            await conn.execute("""
-                DELETE FROM statistics WHERE mission_id in (
-                    SELECT id FROM missions WHERE server_name = %s
-                )
-            """, (server, ))
-            await conn.execute("""
-                DELETE FROM statistics WHERE mission_id NOT IN (
-                    SELECT id FROM missions
-                )
-            """)
+        await conn.execute("""
+            DELETE FROM statistics WHERE hop_off < (DATE(now() AT TIME ZONE 'utc') - %s::interval)
+        """, (f'{days} days',))
         self.log.debug('Userstats pruned.')
-
-    async def update_ucid(self, conn: psycopg.AsyncConnection, old_ucid: str, new_ucid: str) -> None:
-        await conn.execute("UPDATE statistics SET player_ucid = %s WHERE player_ucid = %s", (new_ucid, old_ucid))
-        await conn.execute("UPDATE squadron_members SET player_ucid = %s WHERE player_ucid = %s", (new_ucid, old_ucid))
 
     @command(description='Deletes the statistics of a server')
     @app_commands.guild_only()
@@ -160,26 +138,12 @@ class UserStatistics(Plugin[UserStatisticsEventListener]):
         async with self.apool.connection() as conn:
             async with conn.transaction():
                 if _server:
-                    await conn.execute("""
-                        DELETE FROM statistics WHERE mission_id in (
-                            SELECT id FROM missions WHERE server_name = %s
-                        )
-                        """, (_server.name,))
-                    await conn.execute("""
-                        DELETE FROM missionstats WHERE mission_id in (
-                            SELECT id FROM missions WHERE server_name = %s
-                        )
-                    """, (_server.name,))
                     await conn.execute('DELETE FROM missions WHERE server_name = %s', (_server.name,))
                     await interaction.followup.send(f'Statistics for server "{_server.display_name}" have been wiped.',
                                                     ephemeral=ephemeral)
                     await self.bot.audit('reset statistics', user=interaction.user, server=_server)
                 else:
-                    await conn.execute("TRUNCATE TABLE statistics")
-                    await conn.execute("TRUNCATE TABLE missionstats")
-                    await conn.execute("TRUNCATE TABLE missions")
-                    if 'greenieboard' in self.node.plugins:
-                        await conn.execute("TRUNCATE TABLE traps")
+                    await conn.execute("TRUNCATE TABLE missions CASCADE")
                     await interaction.followup.send(f'Statistics for ALL servers have been wiped.', ephemeral=ephemeral)
                     await self.bot.audit('reset statistics of ALL servers', user=interaction.user)
 
@@ -263,8 +227,8 @@ class UserStatistics(Plugin[UserStatisticsEventListener]):
                 ephemeral=ephemeral):
             async with self.apool.connection() as conn:
                 async with conn.transaction():
-                    for plugin in self.bot.cogs.values():  # type: Plugin
-                        await plugin.prune(conn, ucids=[ucid])
+                    await conn.execute('DELETE FROM statistics WHERE player_ucid = %s', (ucid,))
+                    await conn.execute('DELETE FROM missionstats WHERE init_id = %s', (ucid,))
                 await interaction.followup.send(_('Statistics for user "{}" have been wiped.').format(name),
                                                 ephemeral=ephemeral)
 
@@ -643,6 +607,9 @@ class UserStatistics(Plugin[UserStatisticsEventListener]):
         # noinspection PyUnresolvedReferences
         await interaction.response.defer()
         campaign_id, name = utils.get_running_campaign(self.node, server)
+        if not campaign_id:
+            await interaction.followup.send(_("You don't have an active campaign."), ephemeral=True)
+            return
         squadron = utils.get_squadron(self.node, squadron_id=squadron_id)
         squadron_obj = DataObjectFactory().new(Squadron, node=self.node, name=squadron['name'],
                                                campaign_id=campaign_id)
@@ -835,7 +802,7 @@ class UserStatistics(Plugin[UserStatisticsEventListener]):
         async with self.apool.connection() as conn:
             async with conn.transaction():
                 await conn.execute("""
-                    REFRESH MATERIALIZED VIEW mv_statistics;
+                    REFRESH MATERIALIZED VIEW CONCURRENTLY mv_statistics;
                 """)
 
     @refresh_views.before_loop
@@ -847,11 +814,8 @@ class UserStatistics(Plugin[UserStatisticsEventListener]):
         if self.get_config().get('wipe_stats_on_leave', True):
             async with self.apool.connection() as conn:
                 async with conn.transaction():
-                    cursor = await conn.execute('SELECT ucid FROM players WHERE discord_id = %s', (member.id,))
                     self.bot.log.debug(f'- Deleting their statistics due to wipe_stats_on_leave')
-                    ucids = [row[0] async for row in cursor]
-                    for plugin in self.bot.cogs.values():  # type: Plugin
-                        await plugin.prune(conn, ucids=ucids)
+                    await conn.execute('DELETE FROM players WHERE discord_id = %s', (member.id,))
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):

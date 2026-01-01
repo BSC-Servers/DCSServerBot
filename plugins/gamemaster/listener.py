@@ -27,6 +27,10 @@ class GameMasterEventListener(EventListener["GameMaster"]):
         self.chat_log = dict()
         self.tasks: dict[str, asyncio.TimerHandle] = {}
 
+    async def shutdown(self) -> None:
+        for task in self.tasks.values():
+            task.cancel()
+
     async def can_run(self, command: ChatCommand, server: Server, player: Player) -> bool:
         coalitions_enabled = server.locals.get('coalitions')
         coalition = await self.get_coalition(server, player) if coalitions_enabled else None
@@ -77,18 +81,19 @@ class GameMasterEventListener(EventListener["GameMaster"]):
                 Side.RED: 31,
                 Side.BLUE: 34,
                 Side.NEUTRAL: 37,
-                Side.SPECTATOR: 37,
                 Side.UNKNOWN: 37
             }
             if data['to'] == -2:
                 color = colors[player.side]
             else:
-                color = colors[Side.SPECTATOR]
+                color = colors[Side.NEUTRAL]
             asyncio.create_task(chat_channel.send(
                 f"```ansi\n\u001b[1;{color}mPlayer {player.name} said: {data['message']}```"
             ))
 
     async def get_coalition(self, server: Server, player: Player) -> Coalition | None:
+        if not server.locals.get('coalitions'):
+            return None
         if not player.coalition:
             lock_time = server.locals['coalitions'].get('lock_time', '1 day')
             async with self.apool.connection() as conn:

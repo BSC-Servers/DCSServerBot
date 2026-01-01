@@ -7,21 +7,22 @@ import discord
 import faulthandler
 import logging
 import os
-import pathlib
 import psycopg
 import sys
 import time
 import traceback
 
 from datetime import datetime
+from pathlib import Path
 from psycopg import OperationalError
+from typing import Any, Coroutine
 
 # DCSServerBot imports
 try:
     from core import (
         NodeImpl, ServiceRegistry, ServiceInstallationError, utils, YAMLError, FatalException, COMMAND_LINE_ARGS,
-        CloudRotatingFileHandler
-    )
+        CloudRotatingFileHandler, wait_for_internet
+)
     from pid import PidFile, PidFileError
     from rich import print
     from rich.console import Console
@@ -72,7 +73,7 @@ class Main:
 
         # Setup file logging
         try:
-            config = yaml.load(pathlib.Path(os.path.join(config_dir, 'main.yaml')).read_text(encoding='utf-8'))['logging']
+            config = yaml.load(Path(os.path.join(config_dir, 'main.yaml')).read_text(encoding='utf-8'))['logging']
         except (FileNotFoundError, KeyError, YAMLError):
             config = {}
         os.makedirs('logs', exist_ok=True)
@@ -167,7 +168,7 @@ class Main:
                         for cls in [x for x in registry.services().keys() if registry.master_only(x)]:
                             try:
                                 await registry.new(cls).start()
-                            except ServiceInstallationError as ex:
+                            except Exception as ex:
                                 self.log.error(f"  - {ex.__str__()}")
                                 self.log.error(f"  => {cls.__name__} NOT loaded.")
                         # now switch all others
@@ -206,7 +207,7 @@ def handle_exception(loop, context):
         log.error(f"Async error: {message}")
 
     # Write to async_errors.log with task information
-    with open(os.path.join('logs', 'async_errors.log'), 'a') as f:
+    with open(os.path.join('logs', 'async_errors.log'), 'a', encoding='utf-8') as f:
         f.write(f"\n{'=' * 50}\n{datetime.now().isoformat()}: {message}\n")
 
         # Dump all running tasks
@@ -234,6 +235,29 @@ async def run_node(name, config_dir=None, no_autoupdate=False) -> int:
         await Main(node, no_autoupdate=no_autoupdate).run()
         return node.rc
 
+async def restore_node(name: str, config_dir: str, restarted: bool) -> int:
+    from restore import Restore
+
+    print("[blink][red]***********************\n"
+          "*** RESTORE PROCESS ***\n"
+          "***********************\n[/red][/blink]")
+    print("")
+    print("Processing ...")
+    restore = Restore(name, config_dir, quiet=restarted)
+    try:
+        return await restore.run(Path('restore'), delete=True)
+    finally:
+        utils.safe_rmtree('restore')
+
+
+def myasyncio_run(func: Coroutine[Any, Any, Any]) -> Any:
+    if sys.platform == "win32" and sys.version_info >= (3, 14):
+        import selectors
+
+        return asyncio.run(func, loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()))
+    else:
+        return asyncio.run(func)
+
 
 if __name__ == "__main__":
     console = Console()
@@ -257,10 +281,16 @@ if __name__ == "__main__":
         Main.reveal_passwords(args.config)
         exit(-2)
 
-    # Require Python >= 3.10 and <= 3.14
-    if sys.version_info <= (3,10):
+    # Require Python >= 3.10
+    if sys.version_info < (3,10):
         print("ERROR: DCSServerBot requires Python >= 3.10.")
         sys.exit(-2)
+    elif sys.version_info < (3,11):
+        print(
+"""
+WARNING: DCSServerBot will drop support for Pyton 3.10 soon.
+         Please upgrade to Python 3.11+
+""")
 
     # Add certificates
     os.environ["SSL_CERT_FILE"] = certifi.where()
@@ -271,35 +301,33 @@ if __name__ == "__main__":
 
         migrate_3(node=args.node)
 
+    # Call the restore process
+    if os.path.exists('restore'):
+        rc = myasyncio_run(restore_node(name=args.node, config_dir=args.config, restarted=args.restarted))
+        if rc:
+            exit(rc)
+        else:
+            print("")
+
     fault_log = open(os.path.join('logs', 'fault.log'), 'w')
+    if args.ping:
+        # wait for an internet connection to be available (after system reboots)
+        log.info("Checking internet connection ...")
+        if not myasyncio_run(wait_for_internet(host="8.8.8.8", timeout=300.0)):
+            print("Internet connection not available. Exiting.")
+            exit(-1)
     try:
         # enable faulthandler
         faulthandler.enable(file=fault_log, all_threads=True)
 
         with PidFile(pidname=f"dcssb_{args.node}", piddir='.'):
             try:
-                if sys.platform == "win32" and sys.version_info >= (3, 14):
-                    import selectors
-
-                    rc = asyncio.run(
-                        run_node(name=args.node, config_dir=args.config, no_autoupdate=args.noupdate),
-                        loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
-                    )
-                else:
-                    rc = asyncio.run(run_node(name=args.node, config_dir=args.config, no_autoupdate=args.noupdate))
+                rc = myasyncio_run(run_node(name=args.node, config_dir=args.config, no_autoupdate=args.noupdate))
             except FatalException:
                 from install import Install
 
                 Install(node=args.node).install(config_dir=args.config, user='dcsserverbot', database='dcsserverbot')
-                if sys.platform == "win32" and sys.version_info >= (3, 12):
-                    import selectors
-
-                    rc = asyncio.run(
-                        run_node(name=args.node, config_dir=args.config, no_autoupdate=args.noupdate),
-                        loop_factory=lambda: asyncio.SelectorEventLoop(selectors.SelectSelector()),
-                    )
-                else:
-                    rc = asyncio.run(run_node(name=args.node, config_dir=args.config, no_autoupdate=args.noupdate))
+                rc = myasyncio_run(run_node(name=args.node, config_dir=args.config, no_autoupdate=args.noupdate))
     except PermissionError as ex:
         log.error(f"There is a permission error: {ex}", exc_info=True)
         # do not restart again

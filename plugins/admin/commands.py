@@ -20,7 +20,7 @@ from plugins.modmanager.commands import get_installed_mods
 from plugins.scheduler.views import ConfigView
 from services.bot import DCSServerBot
 from services.modmanager import ModManagerService
-from typing import Literal, Type
+from typing import Literal
 from zipfile import ZipFile, ZIP_DEFLATED
 
 # ruamel YAML support
@@ -46,13 +46,13 @@ async def available_modules_autocomplete(interaction: discord.Interaction,
     if not await interaction.command._check_can_run(interaction):
         return []
     try:
-        node = await utils.NodeTransformer().transform(interaction, utils.get_interaction_param(interaction, "node"))
+        node = await utils.NodeTransformer().transform(interaction, interaction.namespace.node)
         available_modules = (set(await node.get_available_modules()) -
                              set(await node.get_installed_modules()))
         return [
             app_commands.Choice(name=x, value=x)
             for x in available_modules
-            if not current or current.casefold() in x.casefold()
+            if 0 < len(x) <= 100 and (not current or current.casefold() in x.casefold())
         ][:25]
     except Exception as ex:
         interaction.client.log.exception(ex)
@@ -64,7 +64,7 @@ async def installed_modules_autocomplete(interaction: discord.Interaction,
     if not await interaction.command._check_can_run(interaction):
         return []
     try:
-        node = await utils.NodeTransformer().transform(interaction, utils.get_interaction_param(interaction, "node"))
+        node = await utils.NodeTransformer().transform(interaction, interaction.namespace.node)
         available_modules = await node.get_installed_modules()
         choices: list[app_commands.Choice[str]] = [
             app_commands.Choice(name=x, value=x)
@@ -81,8 +81,7 @@ async def label_autocomplete(interaction: discord.Interaction, current: str) -> 
     if not await interaction.command._check_can_run(interaction):
         return []
     try:
-        server: Server = await utils.ServerTransformer().transform(
-            interaction, utils.get_interaction_param(interaction, 'server'))
+        server: Server = await utils.ServerTransformer().transform(interaction, interaction.namespace.server)
         if not server:
             return []
         config = interaction.client.cogs['Admin'].get_config(server)
@@ -102,8 +101,7 @@ async def label_autocomplete(interaction: discord.Interaction, current: str) -> 
 
 async def _mission_file_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     try:
-        server: Server = await utils.ServerTransformer().transform(
-            interaction, utils.get_interaction_param(interaction, 'server'))
+        server: Server = await utils.ServerTransformer().transform(interaction, interaction.namespace.server)
         file_list = await server.getAllMissionFiles()
         exp_base = await server.get_missions_dir()
         choices: list[app_commands.Choice[str]] = [
@@ -121,11 +119,10 @@ async def file_autocomplete(interaction: discord.Interaction, current: str) -> l
     if not await interaction.command._check_can_run(interaction):
         return []
     try:
-        server: Server = await utils.ServerTransformer().transform(
-            interaction, utils.get_interaction_param(interaction, 'server'))
+        server: Server = await utils.ServerTransformer().transform(interaction, interaction.namespace.server)
         if not server:
             return []
-        label = utils.get_interaction_param(interaction, "what")
+        label = interaction.namespace.what
         # missions will be handled differently
         if label == 'Missions':
             return await _mission_file_autocomplete(interaction, current)
@@ -211,9 +208,9 @@ async def get_dcs_branches(interaction: discord.Interaction, current: str) -> li
 async def get_dcs_versions(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     if not await interaction.command._check_can_run(interaction):
         return []
-    branch = utils.get_interaction_param(interaction, 'branch')
+    branch = interaction.namespace.branch
     if not branch:
-        node = await NodeTransformer().transform(interaction, utils.get_interaction_param(interaction, 'node'))
+        node = await NodeTransformer().transform(interaction, interaction.namespace.node)
         branch, _ = await node.get_dcs_branch_and_version()
     versions = await interaction.client.node.get_available_dcs_versions(branch)
     return [
@@ -240,8 +237,7 @@ async def all_servers_autocomplete(interaction: discord.Interaction, current: st
 async def extensions_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
     if not await interaction.command._check_can_run(interaction):
         return []
-    server: Server = await utils.ServerTransformer().transform(
-        interaction, utils.get_interaction_param(interaction, 'server'))
+    server: Server = await utils.ServerTransformer().transform(interaction, interaction.namespace.server)
     extensions = await server.list_extension()
     current = current.casefold()
     choices: list[app_commands.Choice[str]] = [
@@ -254,8 +250,8 @@ async def extensions_autocomplete(interaction: discord.Interaction, current: str
 
 class Admin(Plugin[AdminEventListener]):
 
-    def __init__(self, bot: DCSServerBot, listener: Type[AdminEventListener]):
-        super().__init__(bot, listener)
+    async def cog_load(self):
+        await super().cog_load()
         self.cleanup.add_exception_type(psycopg.DatabaseError)
         self.cleanup.start()
 
@@ -525,7 +521,7 @@ class Admin(Plugin[AdminEventListener]):
         ephemeral = utils.get_ephemeral(interaction)
         # noinspection PyUnresolvedReferences
         await interaction.response.defer(ephemeral=ephemeral)
-        num_servers = len([x for x in node.instances if x.server and x.server.status != Status.SHUTDOWN])
+        num_servers = len([x for x in node.instances.values() if x.server and x.server.status != Status.SHUTDOWN])
         if num_servers and not await utils.yn_question(
                 interaction, _("Shutdown all servers on node {} for the installation?").format(node.name),
                 ephemeral=ephemeral):
@@ -548,7 +544,7 @@ class Admin(Plugin[AdminEventListener]):
         ephemeral = utils.get_ephemeral(interaction)
         # noinspection PyUnresolvedReferences
         await interaction.response.defer(ephemeral=ephemeral)
-        num_servers = len([x for x in node.instances if x.server and x.server.status != Status.SHUTDOWN])
+        num_servers = len([x for x in node.instances.values() if x.server and x.server.status != Status.SHUTDOWN])
         if num_servers and not await utils.yn_question(
                 interaction, _("Shutdown all servers on node {} for the uninstallation?").format(node.name),
                 ephemeral=ephemeral):
@@ -714,26 +710,21 @@ class Admin(Plugin[AdminEventListener]):
                         else:
                             await interaction.followup.send("{} is not a valid UCID!".format(user))
                             return
-                        for plugin in self.bot.cogs.values():  # type: Plugin
-                            await plugin.prune(conn, ucids=[ucid])
-                            await cursor.execute('DELETE FROM players WHERE ucid = %s', (ucid, ))
-                            await cursor.execute('DELETE FROM players_hist WHERE ucid = %s', (ucid, ))
+                        await cursor.execute('DELETE FROM players WHERE ucid = %s', (ucid, ))
                         if isinstance(user, discord.Member):
                             await interaction.followup.send(_("Data of user {} deleted.").format(user.display_name))
                         else:
                             await interaction.followup.send(_("Data of UCID {} deleted.").format(ucid))
                         return
                     elif _server:
-                        for plugin in self.bot.cogs.values():  # type: Plugin
-                            await plugin.prune(conn, server=_server)
-                            await cursor.execute('DELETE FROM servers WHERE server_name = %s', (_server, ))
-                            await cursor.execute('DELETE FROM instances WHERE server_name = %s', (_server, ))
-                            await cursor.execute('DELETE FROM message_persistence WHERE server_name = %s', (_server, ))
+                        await cursor.execute('DELETE FROM servers WHERE server_name = %s', (_server, ))
                         await interaction.followup.send(_("Data of server {} deleted.").format(_server))
                         return
                     elif view.what in ['users', 'non-members']:
-                        sql = (f"SELECT ucid FROM players "
-                               f"WHERE last_seen < (DATE((now() AT TIME ZONE 'utc')) - interval '{view.age} days')")
+                        sql = f"""
+                            SELECT ucid FROM players 
+                            WHERE last_seen < (DATE((now() AT TIME ZONE 'utc')) - interval '{view.age} days')
+                        """
                         if view.what == 'non-members':
                             sql += ' AND discord_id = -1'
                         await cursor.execute(sql)
@@ -745,11 +736,8 @@ class Admin(Plugin[AdminEventListener]):
                                 interaction, _("This will delete {} players incl. their stats from the database.\n"
                                                "Are you sure?").format(len(ucids)), ephemeral=ephemeral):
                             return
-                        for plugin in self.bot.cogs.values():  # type: Plugin
-                            await plugin.prune(conn, ucids=ucids)
                         for ucid in ucids:
                             await cursor.execute('DELETE FROM players WHERE ucid = %s', (ucid, ))
-                            await cursor.execute('DELETE FROM players_hist WHERE ucid = %s', (ucid,))
                         await interaction.followup.send(f"{len(ucids)} players pruned.", ephemeral=ephemeral)
                     elif view.what == 'data':
                         days = int(view.age)
@@ -757,8 +745,9 @@ class Admin(Plugin[AdminEventListener]):
                                 interaction, _("This will delete all data older than {} days from the database.\n"
                                                "Are you sure?").format(days), ephemeral=ephemeral):
                             return
+                        # some plugins need to prune their data based on the provided days
                         for plugin in self.bot.cogs.values():  # type: Plugin
-                            await plugin.prune(conn, days=days)
+                            await plugin.prune(conn, days)
                         await interaction.followup.send(_("All data older than {} days pruned.").format(days),
                                                         ephemeral=ephemeral)
         await self.bot.audit(f'pruned the database', user=interaction.user)
@@ -912,7 +901,7 @@ class Admin(Plugin[AdminEventListener]):
         if node:
             await _node_offline(node.name)
         else:
-            tasks = [_node_offline(node.name) for node in self.bus.nodes.values()]
+            tasks = [_node_offline(node.name) for node in self.node.all_nodes.values()]
             tasks.append(_node_offline(self.node.name))
             await asyncio.gather(*tasks)
 
@@ -929,7 +918,8 @@ class Admin(Plugin[AdminEventListener]):
                 await server.startup()
                 server.maintenance = False
             except (TimeoutError, asyncio.TimeoutError):
-                await interaction.followup.send(_("Timeout while starting server {}!").format(server.name))
+                await interaction.followup.send(_("Timeout while starting server {}!").format(server.name),
+                                                ephemeral=True)
 
         async def _node_online(node_name: str):
             next_startup = 0
@@ -940,7 +930,7 @@ class Admin(Plugin[AdminEventListener]):
                     next_startup += startup_delay
                 else:
                     server.maintenance = False
-            await interaction.followup.send(_("Node {} is now online.").format(node_name))
+            await interaction.followup.send(_("Node {} is now online.").format(node_name), ephemeral=ephemeral)
             await self.bot.audit(f"took node {node_name} online.", user=interaction.user)
 
         ephemeral = utils.get_ephemeral(interaction)
@@ -1046,12 +1036,13 @@ class Admin(Plugin[AdminEventListener]):
 Instance {instance} added to node {node}.
 Please make sure you forward the following ports:
 ```
-- DCS Port:    {dcs_port} (TCP/UDP)
-- WebGUI Port: {webgui_port} (TCP)
+- DCS Port:    {dcs_port}
+- WebGUI Port: {webgui_port}
 ```
-                """).format(instance=name, node=node.name, dcs_port=instance.dcs_port,
-                            webgui_port=instance.webgui_port), ephemeral=ephemeral)
+                """).format(instance=name, node=node.name, dcs_port=repr(instance.dcs_port),
+                            webgui_port=repr(instance.webgui_port)), ephemeral=ephemeral)
             else:
+                await instance.server.unlink()
                 await interaction.followup.send(
                     _("Instance {} created blank with no server assigned.").format(instance.name), ephemeral=ephemeral)
         else:
@@ -1086,7 +1077,7 @@ Please make sure you forward the following ports:
                 await mod_manager.uninstall_package(instance.server, folder, package, version)
 
         remove_files = await utils.yn_question(
-            interaction, _("Do you want to remove the directory {}?").format(instance.home), ephemeral=ephemeral)
+            interaction, _("Do you want to remove the directory\n{}?").format(instance.home), ephemeral=ephemeral)
         try:
             await node.delete_instance(instance, remove_files)
             await interaction.followup.send(
@@ -1376,7 +1367,7 @@ Please make sure you forward the following ports:
         else:
             await message.channel.send(
                 _('To apply the new config by restarting a node or the whole cluster, use {}').format(
-                    (await utils.get_command(self.bot, group='node', name='restart')).mention
+                    (await utils.get_command(self.bot, group=self.node_group.name, name=self.restart.name)).mention
                 )
             )
 
@@ -1387,8 +1378,12 @@ Please make sure you forward the following ports:
         if ucid and self.bot.locals.get('autoban', False):
             await self.bus.unban(ucid)
         if self.bot.locals.get('greeting_dm'):
-            channel = await member.create_dm()
-            await channel.send(self.bot.locals['greeting_dm'].format(name=member.name, guild=member.guild.name))
+            try:
+                channel = await member.create_dm()
+                await channel.send(self.bot.locals['greeting_dm'].format(name=member.name, guild=member.guild.name))
+            except discord.Forbidden:
+                self.log.debug("Could not send greeting DM to user {} due to their Discord limitations.".format(
+                    member.display_name))
         autorole = self.bot.locals.get('autorole', {}).get('on_join')
         if autorole:
             try:

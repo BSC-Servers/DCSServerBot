@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 
 class SlotBlockingListener(EventListener["SlotBlocking"]):
+
     def __init__(self, plugin: "SlotBlocking"):
         super().__init__(plugin)
         self.lock = asyncio.Lock()
@@ -187,7 +188,7 @@ class SlotBlockingListener(EventListener["SlotBlocking"]):
         # if payback is enabled, we need to clear the deposit on any slot change
         if config.get('payback', False):
             player.deposit = 0
-        elif (Side(data['side']) != Side.SPECTATOR and data['sub_slot'] == 0
+        elif (Side(data['side']) != Side.NEUTRAL and data['sub_slot'] == 0
               and not self.get_config(server, plugin_name='missionstats').get('enabled', True)):
             asyncio.create_task(self._pay_for_plane(server, player, data, payback=False))
 
