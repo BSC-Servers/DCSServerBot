@@ -3,7 +3,7 @@ import discord
 from core import report, Server, Side, get_translation, utils
 from datetime import datetime
 
-from .const import PRETENSE_RANKS
+from .const import PRETENSE_RANKS, get_rank_name_for_xp
 
 _ = get_translation(__name__.split('.')[1])
 
@@ -47,7 +47,7 @@ class ZoneDistribution(report.PieChart):
                 neutral[name] = zone
         return {"blue": blue, "neutral": neutral, "red": red}
 
-    async def render(self, data: dict, **kwargs):
+    async def render(self, data: dict):
         zones = data["zones"]
         if not zones.get('blue') and not zones.get('red') and not zones.get('neutral'):
             zones = self.normalize_zones(zones)
@@ -65,10 +65,7 @@ class ZoneDistribution(report.PieChart):
 class Top10Pilots(report.EmbedElement):
     @staticmethod
     def get_rank(xp):
-        for rank in reversed(list(PRETENSE_RANKS.keys())):
-            if xp >= PRETENSE_RANKS[rank]["requiredXP"]:
-                return PRETENSE_RANKS[rank]["name"]
-        return None
+        return get_rank_name_for_xp(xp)
 
     async def render(self, data: dict):
         # Extract player scores from the JSON data

@@ -1,5 +1,4 @@
 import discord
-import json
 import os
 
 from core import Plugin, Status, PersistentReport, Channel, utils, Server, Report, get_translation, Group
@@ -9,6 +8,9 @@ from discord.utils import MISSING
 from services.bot import DCSServerBot
 from typing import Literal
 
+from .const import RANK_CODES, get_rank_for_xp
+from .lua_parser import parse_lua_table
+
 _ = get_translation(__name__.split('.')[1])
 
 
@@ -17,6 +19,9 @@ class Pretense(Plugin):
     def __init__(self, bot: DCSServerBot):
         super().__init__(bot)
         self.last_mtime = dict()
+        # Persist highest known ranks across leaderboard updates to avoid flapping role assignments
+        # when servers are restarted or their player stats files temporarily disappear.
+        self.highest_ranks: dict[str, int] = {}
 
     async def cog_load(self) -> None:
         await super().cog_load()
@@ -41,20 +46,20 @@ class Pretense(Plugin):
         # noinspection PyUnresolvedReferences
         await interaction.response.defer()
         config = self.get_config(server) or {}
-        json_file_path = config.get('json_file_path',
-                                    os.path.join(await server.get_missions_dir(), 'Saves', "player_stats.json"))
-        json_file_path = os.path.expandvars(utils.format_string(json_file_path, instance=server.instance))
-        json_file_path = os.path.expandvars(json_file_path)
+        lua_file_path = config.get('lua_file_path',
+                                   os.path.join(await server.get_missions_dir(), 'Saves', "player_stats_ucid.lua"))
+        lua_file_path = os.path.expandvars(utils.format_string(lua_file_path, instance=server.instance))
+        lua_file_path = os.path.expandvars(lua_file_path)
         try:
-            file_data = await server.node.read_file(json_file_path)
+            file_data = await server.node.read_file(lua_file_path)
         except FileNotFoundError:
             await interaction.followup.send(
-                _("No {} found on this server! Is Pretense active?").format(os.path.basename(json_file_path)),
+                _("No {} found on this server! Is Pretense active?").format(os.path.basename(lua_file_path)),
                 ephemeral=True
             )
             return
         content = file_data.decode(encoding='utf-8')
-        data = json.loads(content)
+        data = parse_lua_table(content)
         report = Report(self.bot, self.plugin_name, "pretense.json")
         env = await report.render(data=data, server=server)
         try:
@@ -70,9 +75,17 @@ class Pretense(Plugin):
     @utils.app_has_role('DCS Admin')
     @app_commands.guild_only()
     async def reset(self, interaction: discord.Interaction,
-                    server: app_commands.Transform[Server, utils.ServerTransformer(status=[
-                        Status.STOPPED, Status.SHUTDOWN])], what: Literal['persistence', 'statistics', 'both']):
-        if server.status not in [Status.STOPPED, Status.SHUTDOWN]:
+                    what: Literal['persistence', 'statistics', 'roles', 'all'],
+                    server: app_commands.Transform[
+                        Server, utils.ServerTransformer(status=[Status.STOPPED, Status.SHUTDOWN])
+                    ] | None = None):
+        if what in ['persistence', 'statistics', 'all'] and not server:
+            await interaction.response.send_message(
+                _("Please specify a server to reset persistence or statistics."),
+                ephemeral=True
+            )
+            return
+        if server and server.status not in [Status.STOPPED, Status.SHUTDOWN]:
             # noinspection PyUnresolvedReferences
             await interaction.response.send_message(
                 _("Server {} needs to be shut down to reset the Pretense progress!").format(server.display_name),
@@ -81,17 +94,54 @@ class Pretense(Plugin):
         ephemeral = utils.get_ephemeral(interaction)
         if not await utils.yn_question(interaction, _("Do you really want to reset the Pretense progress?")):
             await interaction.followup.send(_("Aborted."), ephemeral=ephemeral)
-        if what == 'persistence' or what == 'both':
-            path = os.path.join(await server.get_missions_dir(), 'Saves', "pretense_*.json")
-            await server.node.remove_file(path)
+            return
+        if what == 'persistence' or what == 'all':
+            saves_dir = os.path.join(await server.get_missions_dir(), 'Saves')
+            await server.node.remove_file(os.path.join(saves_dir, "pretense_*.lua"))
+            await server.node.remove_file(os.path.join(saves_dir, "pretense_*.json"))
             await interaction.followup.send(_("Pretense persistence reset."), ephemeral=ephemeral)
-        if what == 'statistics' or what == 'both':
-            path = os.path.join(await server.get_missions_dir(), 'Saves', "player_stats*.json")
+        if what == 'statistics' or what == 'all':
+            path = os.path.join(await server.get_missions_dir(), 'Saves', "player_stats*.lua")
             await server.node.remove_file(path)
             await interaction.followup.send(_("Pretense statistics reset."), ephemeral=ephemeral)
+        if what == 'roles' or what == 'all':
+            rank_roles = self.get_config().get('rank_roles', {}) or {}
+            if not rank_roles:
+                await interaction.followup.send(_("No Pretense rank roles configured."), ephemeral=ephemeral)
+                return
+            roles_to_clear = []
+            for role_id in rank_roles.values():
+                role = self.bot.get_role(role_id)
+                if not role:
+                    self.log.warning("Pretense: Discord role %s not found.", role_id)
+                    continue
+                roles_to_clear.append(role)
+            if not roles_to_clear:
+                await interaction.followup.send(_("No Pretense rank roles found to reset."), ephemeral=ephemeral)
+                return
+            members_to_roles = {}
+            for role in roles_to_clear:
+                for member in role.members:
+                    members_to_roles.setdefault(member, []).append(role)
+            for member, roles in members_to_roles.items():
+                try:
+                    await member.remove_roles(*roles)
+                except discord.Forbidden:
+                    await self.bot.audit('permission "Manage Roles" missing.', user=self.bot.member)
+                    break
+                except discord.HTTPException as ex:
+                    self.log.exception(ex)
+            self.highest_ranks.clear()
+            await interaction.followup.send(_("Pretense rank roles reset."), ephemeral=ephemeral)
 
     @tasks.loop(seconds=120)
     async def update_leaderboard(self):
+        rank_roles = self.get_config().get('rank_roles', {}) or {}
+        if rank_roles:
+            highest_ranks = self.highest_ranks
+        else:
+            self.highest_ranks = {}
+            highest_ranks = None
         for server in self.bot.servers.values():
             try:
                 if server.status != Status.RUNNING:
@@ -99,24 +149,31 @@ class Pretense(Plugin):
                 config = self.get_config(server)
                 if not config:
                     continue
-                json_file_path = config.get(
-                    'json_file_path',
-                    os.path.join(await server.get_missions_dir(), 'Saves', "player_stats.json")
+                lua_file_path = config.get(
+                    'lua_file_path',
+                    os.path.join(await server.get_missions_dir(), 'Saves', "player_stats_ucid.lua")
                 )
-                json_file_path = os.path.expandvars(utils.format_string(json_file_path, instance=server.instance))
-                json_file_path = os.path.expandvars(json_file_path)
+                lua_file_path = os.path.expandvars(utils.format_string(lua_file_path, instance=server.instance))
+                lua_file_path = os.path.expandvars(lua_file_path)
                 try:
-                    file_data = await server.node.read_file(json_file_path)
+                    file_data = await server.node.read_file(lua_file_path)
                 except FileNotFoundError:
                     continue
                 content = file_data.decode(encoding='utf-8')
-                data = json.loads(content)
+                data = parse_lua_table(content)
+                if highest_ranks is not None:
+                    ranks = self._collect_player_ranks(data)
+                    for ucid, rank in ranks.items():
+                        if rank > highest_ranks.get(ucid, 0):
+                            highest_ranks[ucid] = rank
                 report = PersistentReport(self.bot, self.plugin_name, "pretense.json", embed_name="leaderboard",
                                           channel_id=config.get('channel', server.channels[Channel.STATUS]),
                                           server=server)
                 await report.render(data=data, server=server)
             except Exception as ex:
                 self.log.exception(ex)
+        if highest_ranks is not None:
+            await self._apply_rank_roles(highest_ranks, rank_roles)
 
     @update_leaderboard.before_loop
     async def before_check(self):
@@ -132,8 +189,9 @@ class Pretense(Plugin):
 
         server = self.bot.get_server(message, admin_only=True)
         for attachment in message.attachments:
-            if not (attachment.filename in ['player_stats.json', 'player_stats_v2.0.json'] or
-                    (attachment.filename.startswith('pretense') and attachment.filename.endswith('.json'))):
+            if not (attachment.filename in ['player_stats_ucid.lua', 'player_stats.json', 'player_stats_v2.0.json'] or
+                    (attachment.filename.startswith('pretense') and
+                     (attachment.filename.endswith('.json') or attachment.filename.endswith('.lua')))):
                 continue
             if not server:
                 ctx = await self.bot.get_context(message)
@@ -160,6 +218,73 @@ class Pretense(Plugin):
             finally:
                 await message.delete()
 
+    @staticmethod
+    def _collect_player_ranks(data: dict) -> dict[str, int]:
+        ranks = {}
+        stats = data.get("stats", {})
+        if not isinstance(stats, dict):
+            return ranks
+        for player, player_stats in stats.items():
+            if not isinstance(player_stats, dict):
+                continue
+            xp = player_stats.get("XP")
+            if xp is None:
+                continue
+            try:
+                xp = int(xp)
+            except (TypeError, ValueError):
+                continue
+            ucid = player if utils.is_ucid(player) else player_stats.get("ucid")
+            if not utils.is_ucid(ucid):
+                continue
+            rank, _ = get_rank_for_xp(xp)
+            if rank is None:
+                continue
+            if rank > ranks.get(ucid, 0):
+                ranks[ucid] = rank
+        return ranks
+
+    async def _apply_rank_roles(self, ranks: dict[str, int], role_config: dict) -> None:
+        if not ranks:
+            return
+        if not self.bot.guilds:
+            return
+        rank_roles: dict[int, discord.Role] = {}
+        for rank_code, role_id in role_config.items():
+            rank_code = str(rank_code).upper()
+            level = RANK_CODES.get(rank_code)
+            if not level:
+                self.log.warning("Pretense: Unknown rank code %s in configuration.", rank_code)
+                continue
+            role = self.bot.get_role(role_id)
+            if not role:
+                self.log.warning("Pretense: Discord role %s for rank %s not found.", role_id, rank_code)
+                continue
+            rank_roles[level] = role
+        if not rank_roles:
+            return
+        for ucid, level in ranks.items():
+            member = self.bot.get_member_by_ucid(ucid, verified=True)
+            if not member:
+                continue
+            # Find the highest configured role at or below the player's level
+            applicable = [lvl for lvl in rank_roles if lvl <= level]
+            desired_level = max(applicable) if applicable else None
+            desired_role = rank_roles.get(desired_level) if desired_level else None
+            roles_to_remove = [role for lvl, role in rank_roles.items()
+                               if role in member.roles and lvl != desired_level and role != desired_role]
+            if not roles_to_remove and (not desired_role or desired_role in member.roles):
+                # Member already has the correct role and no other rank roles to clean up.
+                continue
+            try:
+                if roles_to_remove:
+                    await member.remove_roles(*roles_to_remove)
+                if desired_role and desired_role not in member.roles:
+                    await member.add_roles(desired_role)
+            except discord.Forbidden:
+                await self.bot.audit('permission "Manage Roles" missing.', user=self.bot.member)
+            except discord.HTTPException as ex:
+                self.log.exception(ex)
 
 
 async def setup(bot: DCSServerBot):
