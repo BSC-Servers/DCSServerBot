@@ -1,0 +1,86 @@
+schema;instance_schema:
+  type: map
+  func: is_node
+  nullable: false
+  mapping:
+    regex;(.+):
+      include: 'element_schema'
+
+schema;element_schema:
+  type: map
+  func: is_element
+  nullable: false
+  mapping:
+    update_interval: {type: int, range: {min: 60}, nullable: false}
+    stats_dir: {type: str, nullable: false, range: {min: 1}, func: dir_exists}
+    zone_file_path: {type: str, nullable: false, range: {min: 1}}
+    channel: {type: int, nullable: false}
+    sleekplan:
+      type: map
+      nullable: true
+      mapping:
+        channel: {type: int, nullable: false}
+        product_id: {type: any, nullable: true}
+        board_url: {type: str, nullable: true}
+        debug: {type: bool, nullable: true}
+        webhook:
+          type: map
+          nullable: true
+          mapping:
+            secret: {type: str, nullable: false, range: {min: 1}}
+            path: {type: str, nullable: true}
+        events:
+          type: seq
+          nullable: true
+          sequence:
+            - {type: str, nullable: false, enum: ['post', 'comment', 'status', 'votes']}
+        vote_milestones:
+          type: seq
+          nullable: true
+          sequence:
+            - {type: int, nullable: false, range: {min: 1}}
+    rank_roles:
+      type: map
+      nullable: true
+      mapping:
+        regex;(.+): {type: any, nullable: false}
+    autoresponder:
+      type: seq
+      nullable: true
+      sequence:
+        - type: map
+          nullable: false
+          mapping:
+            keywords:
+              type: seq
+              nullable: false
+              sequence:
+                - {type: str, nullable: false, range: {min: 1}}
+            cooldown: {type: int, nullable: true, range: {min: 0}}
+            embed:
+              type: map
+              nullable: false
+              mapping:
+                title: {type: str, nullable: true}
+                url: {type: str, nullable: true}
+                description: {type: str, nullable: true}
+                color: {type: any, nullable: true}
+                image: {type: str, nullable: true}
+                thumbnail: {type: str, nullable: true}
+                footer: {type: str, nullable: true}
+
+type: map
+func: check_main_structure
+nullable: false
+mapping:
+  DEFAULT:
+    include: 'element_schema'
+  commands:
+    include: 'commands_schema'
+  chat_commands:
+    include: 'chat_commands_schema'
+  regex;(.+):
+    type: any
+    func: any_of
+    nullable: false
+    enum: ['element_schema', 'instance_schema']
