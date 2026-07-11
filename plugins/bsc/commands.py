@@ -11,9 +11,10 @@ from discord import app_commands
 from discord.ext import tasks, commands
 from fastapi import APIRouter, Request, Response
 from services.bot import DCSServerBot
-from typing import Literal
+from typing import Literal, Type
 
 from .const import RANK_CODES, get_rank_for_xp
+from .listener import BSCListener
 from .lua_parser import parse_lua_table
 
 _ = get_translation(__name__.split('.')[1])
@@ -78,10 +79,10 @@ SLEEKPLAN_STATUS_EMOJI = {
 }
 
 
-class BSC(Plugin):
+class BSC(Plugin[BSCListener]):
 
-    def __init__(self, bot: DCSServerBot):
-        super().__init__(bot)
+    def __init__(self, bot: DCSServerBot, eventlistener: Type[BSCListener] = None):
+        super().__init__(bot, eventlistener)
         # Persist highest known ranks across leaderboard updates to avoid flapping role assignments
         # when servers are restarted or their player stats files temporarily disappear.
         self.highest_ranks: dict[str, int] = {}
@@ -1119,4 +1120,4 @@ class BSC(Plugin):
 
 
 async def setup(bot: DCSServerBot):
-    await bot.add_cog(BSC(bot))
+    await bot.add_cog(BSC(bot, BSCListener))

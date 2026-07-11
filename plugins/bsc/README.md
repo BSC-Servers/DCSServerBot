@@ -34,6 +34,26 @@ filename is produced by DCS and must not be renamed).
 Every parameter has a default value, so a configuration file is only required if you want to
 change a channel, change the stats directory, or set up rank roles.
 
+### Automatic restart on low FPS
+If a server's FPS stays below a minimum for a configurable period, the plugin can restart it
+automatically. Add an `fps_restart` section (per instance or in DEFAULT) to enable it:
+
+```yaml
+DEFAULT:
+  fps_restart:
+    min: 10           # restart when the FPS is below this value (default: 10)
+    period: 5         # ... for at least this many minutes (default: 5)
+    shutdown: false   # true: shut down and restart the whole DCS server, false: restart the mission only (default: false)
+    populated: true   # false: do not restart while players are online (default: true)
+    mentioning: true  # mention the admins in the alert message (default: true)
+    message: Server is being restarted due to low performance.  # popup shown to players before the restart
+```
+
+All keys are optional - `fps_restart: {}` enables the check with the defaults shown above.
+Servers in maintenance mode and servers with a restart already pending are never touched.
+The FPS readings come from the monitoring plugin's `perfmon` event, so the (default) monitoring
+plugin has to be loaded.
+
 ### Rank roles
 If you want to assign Discord roles based on the highest BSC rank a user has on any
 server, add a `rank_roles` section. The keys use the rank codes (E-1..E-9, O-1..O-10) and the
