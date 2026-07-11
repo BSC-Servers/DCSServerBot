@@ -54,6 +54,13 @@ Servers in maintenance mode and servers with a restart already pending are never
 The FPS readings come from the monitoring plugin's `perfmon` event, so the (default) monitoring
 plugin has to be loaded.
 
+Because `perfmon` only fires once per 3600 sim frames, a server that is nearly frozen stops
+reporting at all. A watchdog therefore also restarts any running, unpaused server that has not
+sent a single FPS reading for `2 * 3600 / min` seconds (12 minutes at the default `min: 10`) -
+silence that long means the sim is far below the minimum or hung. A reading barely above `min`
+(less than 20% above) neither starts nor clears a low-FPS streak, so a single lucky sample
+cannot reset the period.
+
 ### Rank roles
 If you want to assign Discord roles based on the highest BSC rank a user has on any
 server, add a `rank_roles` section. The keys use the rank codes (E-1..E-9, O-1..O-10) and the
